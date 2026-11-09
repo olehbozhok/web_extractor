@@ -18,15 +18,17 @@
    │   Fetcher       Extractor        storage (SQLite WAL)    │
    │   (протокол)    (протокол)       cache_pages, events     │
    └───────┬───────────────────────────────────────────────────┘
-           │ HTTP (внутрішня мережа compose)
+           │ REST (внутрішня мережа compose)
            ▼
-   ┌── browser (контейнер 2, етап 3) ──┐
-   │ Playwright, пул контекстів        │
-   │ POST /render → html, headers, ... │
-   └───────────────────────────────────┘
+   ┌── browser (етап 3) ────────────────┐
+   │ Crawl4AI, пул браузерів            │
+   │ POST /crawl → html, status, ...    │
+   │ вбудований egress-проксі:          │
+   │ закріплення IP, лише глобальні     │──► інтернет
+   └────────────────────────────────────┘
 ```
 
-Два контейнери, а не три: Trafilatura — чиста функція над HTML без стану, тому живе модулем у ядрі. Браузер винесений, бо він важкий, нестабільний і потребує окремого sandbox. Екстрактор працює з HTML незалежно від того, який фетчер його отримав. Інтерфейс `Extractor` дозволяє замінити реалізацію або пізніше винести її в контейнер без змін конвеєра.
+Сервіси: ядро (власний код) і браузер (готовий образ Crawl4AI). Trafilatura — чиста функція над HTML без стану, тому живе модулем у ядрі. Браузер винесений, бо він важкий, нестабільний і потребує окремого sandbox; власний Playwright-сервіс не пишемо, бо Crawl4AI закриває цю роль (`docs/spikes/01_crawl4ai.md`). Екстрактор працює з HTML незалежно від того, який фетчер його отримав. Інтерфейс `Extractor` дозволяє замінити реалізацію або пізніше винести її в контейнер без змін конвеєра.
 
 ## 2. Шари й напрямок залежностей
 
@@ -94,7 +96,7 @@ CREATE TABLE events (
   ts             TEXT NOT NULL,
   agent          TEXT NOT NULL,
   task           TEXT,
-  mcp_session_id TEXT,
+  mcp_session_id TEXT,                    -- NULL, якщо транспорт не надає сесії (нова специфікація MCP її не має)
   request_id     TEXT NOT NULL,
   tool           TEXT NOT NULL,
   url            TEXT NOT NULL,
@@ -119,14 +121,40 @@ CREATE INDEX events_status_ts ON events(status, ts);
 
 ## 7. Контракт браузерного конектора (етап 3)
 
-```
-POST /render
-{ "url": str, "wait_until": "load"|"domcontentloaded"|"networkidle",
-  "wait_for_selector": str | null, "timeout_ms": int }
+Конектор — це REST Crawl4AI, а не наш власний API. Ядро викликає `POST /crawl` з токеном у `Authorization: Bearer ...`:
 
-200 { "status": "ok", "final_url": str, "http_status": int, "html": str,
-      "headers": {str: str}, "redirect_chain": [str], "page_id": str, "timings": {...} }
-4xx/5xx { "error": { "kind": str, "message": str } }
+```
+POST /crawl
+{ "urls": [url], "browser_config": {...}, "crawler_config": { "cache_mode": "bypass", ... } }
 ```
 
-Контейнер нічого не кешує, не знає про агентів і не пише в БД. Усі підзапити сторінки проходять ту саму перевірку SSRF.
+Кеш Crawl4AI вимкнений (`cache_mode: "bypass"`): єдиний кеш — наш, щоб був один набір правил TTL і `fresh`.
+
+Поля відповіді `results[0]`, що використовуються (перевірено в `docs/spikes/01_crawl4ai.md`):
+
+| Поле Crawl4AI | У що відображається |
+|---|---|
+| `html` | сирий HTML для кешу й `content_sha256` |
+| `redirected_url` | `final_url` |
+| `redirected_status_code` | `http_status` (не `status_code`, воно містить код першої відповіді) |
+| `response_headers` | заголовки відповіді |
+| `success`, `error_message`, `crawl_stats.proxies_used[].blocked` | вибір між `ok`, `blocked`, `error` |
+| `metadata` | початкові метадані (заголовок, опис); автор і дату бере наш екстрактор |
+
+`BrowserFetcher` — адаптер: він парсить відповідь у типи `domain` (розділ 3) і повертає `FetchResult`. Структура відповіді Crawl4AI не виходить за межі цього модуля. Контейнер нічого не знає про агентів і не пише в нашу БД.
+
+### 7.1. Мережева топологія compose
+
+```
+ networks:
+   core_net     # internal: true; ядро <-> browser (REST)
+   egress_net   # звичайна; browser -> інтернет
+```
+
+- `core`: `core_net`; його порт публікується лише на `127.0.0.1` (через окрему мережу для публікації, бо `internal`-мережа не дозволяє публікацію портів).
+- `browser`: `core_net` і `egress_net`. Порт Crawl4AI назовні не публікується. SSRF-захист забезпечує вбудований egress-проксі Crawl4AI (закріплення IP, лише глобальні адреси), а ядро додатково перевіряє `final_url` (`docs/spikes/02_egress_isolation.md`).
+- Томи: БД ядра; кеш браузера не персистентний.
+- `browser`: `restart: unless-stopped`, `shm_size: 1g`, `mem_limit`, образ із закріпленим тегом.
+- **Healthcheck браузера** виконує `raw:`-краул із `wait_for`, тобто реально використовує браузер. `/health` Crawl4AI не відображає смерть Chromium. При невдачі скрипт завершує PID 1, і `restart: unless-stopped` перезапускає контейнер без docker-сокета (від падіння до відновлення близько 20 с). Власні запити ядра в цей час отримують `error`, а не зависають: кожен запит має таймаут.
+- `core` не залежить жорстко від готовності `browser` (`depends_on` без `service_healthy`): падіння браузера не блокує старт ядра. Готовність браузера відображається в `/readyz` окремим пунктом.
+- Дія `restart_browser` у моніторі Crawl4AI не використовується: у спайку 02 вона зависала й погіршувала стан.
