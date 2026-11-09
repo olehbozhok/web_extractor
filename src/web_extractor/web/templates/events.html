@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Events{% endblock %}
+{% block content %}
+<h1>Events</h1>
+<p class="periods">
+  Period:
+  {% for p in ["24h", "7d", "30d"] %}
+    <a href="/events?period={{ p }}" class="{{ 'active' if p == period else '' }}">{{ p }}</a>
+  {% endfor %}
+</p>
+
+<form hx-get="/events" hx-target="#events-table" hx-push-url="false">
+  <input type="hidden" name="period" value="{{ period }}">
+  <input type="text" name="agent" value="{{ filters.agent }}" placeholder="agent">
+  <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain">
+  <select name="status">
+    <option value="">status: any</option>
+    {% for s in statuses %}
+    <option value="{{ s }}" {{ 'selected' if s == filters.status else '' }}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="cache_hit">
+    <option value="">cache: any</option>
+    <option value="true" {{ 'selected' if filters.cache_hit == 'true' else '' }}>hit</option>
+    <option value="false" {{ 'selected' if filters.cache_hit == 'false' else '' }}>miss</option>
+  </select>
+  <select name="fetcher">
+    <option value="">fetcher: any</option>
+    <option value="http" {{ 'selected' if filters.fetcher == 'http' else '' }}>http</option>
+    <option value="browser" {{ 'selected' if filters.fetcher == 'browser' else '' }}>browser</option>
+  </select>
+  <button type="submit">Apply</button>
+</form>
+
+<div id="events-table">
+{% include "events_table.html" %}
+</div>
+{% endblock %}

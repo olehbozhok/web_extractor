@@ -105,6 +105,9 @@ select = [
     # Test fixtures legitimately contain literals like "0.0.0.0"; bandit's
     # bind-to-all-interfaces heuristic misfires on them.
     "S104",
+    # Test data builders take several optional fields; that is fixture code,
+    # not API surface.
+    "PLR0913",
 ]
 "src/web_extractor/fetchers/http_fetcher.py" = [
     # The file overrides httpcore.AsyncNetworkBackend.connect_tcp, whose
@@ -119,6 +122,13 @@ select = [
     "PLR0913",
     "PLR0917",
     "A002",
+]
+"src/web_extractor/web/routes.py" = [
+    # Querystring parameters are the page's API (period, filters, sort,
+    # pagination); each arrives as its own keyword argument. Bundling them
+    # would fight FastAPI's binding mechanism.
+    "PLR0913",
+    "PLR0917",
 ]
 "src/web_extractor/config.py" = [
     # The host literal includes "0.0.0.0" for running inside a container,
