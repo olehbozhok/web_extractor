@@ -45,7 +45,8 @@ enable_error_code = [
     "truthy-bool",
 ]
 plugins = ["pydantic.mypy"]
-files = ["src", "tests"]
+files = ["src", "tests", "evals"]
+mypy_path = "src"
 python_version = "3.13"
 
 [[tool.mypy.overrides]]
@@ -130,6 +131,10 @@ select = [
     # would fight FastAPI's binding mechanism.
     "PLR0913",
     "PLR0917",
+]
+"evals/run.py" = [
+    # A CLI entry point: the report goes to stdout by design.
+    "T20",
 ]
 "src/web_extractor/config.py" = [
     # The host literal includes "0.0.0.0" for running inside a container,

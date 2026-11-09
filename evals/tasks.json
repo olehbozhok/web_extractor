@@ -1,0 +1,257 @@
+{
+  "tasks": [
+    {
+      "id": "read-extract-1",
+      "kind": "read_extract",
+      "url": "http://fixtures.test/article",
+      "prompt": "Read the reactor timeline page and state the year of the accident and the installed capacity.",
+      "max_calls": 3,
+      "expect_contains": [
+        "1986",
+        "4000"
+      ]
+    },
+    {
+      "id": "read-extract-2",
+      "kind": "read_extract",
+      "url": "http://fixtures.test/plain",
+      "prompt": "What are the reading room opening hours on the notice page?",
+      "max_calls": 3,
+      "expect_contains": [
+        "09:00",
+        "18:00"
+      ]
+    },
+    {
+      "id": "read-extract-3",
+      "kind": "read_extract",
+      "url": "http://fixtures.test/article",
+      "prompt": "Which unit's construction finished in 1983, according to the reactor timeline?",
+      "max_calls": 3,
+      "expect_contains": [
+        "unit four"
+      ]
+    },
+    {
+      "id": "read-extract-4",
+      "kind": "read_extract",
+      "url": "http://fixtures.test/article",
+      "prompt": "In which year did construction of unit four finish, according to the page?",
+      "max_calls": 3,
+      "expect_contains": [
+        "1983"
+      ]
+    },
+    {
+      "id": "read-extract-5",
+      "kind": "read_extract",
+      "url": "http://fixtures.test/plain",
+      "prompt": "What is the title of the notice page and what facility is described?",
+      "max_calls": 3,
+      "expect_contains": [
+        "Plain Notice",
+        "reading room"
+      ]
+    },
+    {
+      "id": "quote-verify-1",
+      "kind": "quote_verify",
+      "url": "http://fixtures.test/quote",
+      "query": "no data was falsified — the anomaly came from calibration drift",
+      "prompt": "Verify that the committee page contains the quote about calibration drift verbatim.",
+      "max_calls": 3,
+      "expect_verbatim": true
+    },
+    {
+      "id": "quote-verify-2",
+      "kind": "quote_verify",
+      "url": "http://fixtures.test/quote",
+      "query": "no data was falsified - the anomaly came from calibration drift",
+      "prompt": "Check whether the calibration-drift quote appears on the page; note the dash may differ.",
+      "max_calls": 3,
+      "expect_verbatim": false
+    },
+    {
+      "id": "quote-verify-3",
+      "kind": "quote_verify",
+      "url": "http://fixtures.test/quote",
+      "query": "the committee admitted falsification",
+      "prompt": "Check whether the page says the committee admitted falsification.",
+      "max_calls": 3,
+      "expect_verbatim": false,
+      "expect_contains": [
+        "No match"
+      ]
+    },
+    {
+      "id": "quote-verify-4",
+      "kind": "quote_verify",
+      "url": "http://fixtures.test/quote",
+      "query": "calibration drift",
+      "prompt": "Confirm the phrase calibration drift appears on the committee page.",
+      "max_calls": 3,
+      "expect_verbatim": true
+    },
+    {
+      "id": "quote-verify-5",
+      "kind": "quote_verify",
+      "url": "http://fixtures.test/quote",
+      "query": "final session of March 1999",
+      "prompt": "Verify the committee session month and year verbatim.",
+      "max_calls": 3,
+      "expect_verbatim": true
+    },
+    {
+      "id": "links-check-1",
+      "kind": "links_check",
+      "urls": [
+        "http://fixtures.test/article",
+        "http://fixtures.test/plain",
+        "http://fixtures.test/blocked",
+        "http://fixtures.test/gone"
+      ],
+      "prompt": "Check which of the four sources are alive and what their statuses are.",
+      "max_calls": 3,
+      "expect_url_status": {
+        "http://fixtures.test/article": "ok",
+        "http://fixtures.test/plain": "ok",
+        "http://fixtures.test/blocked": "blocked",
+        "http://fixtures.test/gone": "not_found"
+      }
+    },
+    {
+      "id": "links-check-2",
+      "kind": "links_check",
+      "urls": [
+        "http://fixtures.test/article"
+      ],
+      "prompt": "Check that the reactor timeline URL is alive.",
+      "max_calls": 2,
+      "expect_url_status": {
+        "http://fixtures.test/article": "ok"
+      }
+    },
+    {
+      "id": "links-check-3",
+      "kind": "links_check",
+      "urls": [
+        "http://fixtures.test/blocked"
+      ],
+      "prompt": "Check whether the blocked fixture is reachable.",
+      "max_calls": 2,
+      "expect_url_status": {
+        "http://fixtures.test/blocked": "blocked"
+      }
+    },
+    {
+      "id": "links-check-4",
+      "kind": "links_check",
+      "urls": [
+        "http://fixtures.test/plain",
+        "http://fixtures.test/gone"
+      ],
+      "prompt": "Check the plain notice and the missing page.",
+      "max_calls": 2,
+      "expect_url_status": {
+        "http://fixtures.test/plain": "ok",
+        "http://fixtures.test/gone": "not_found"
+      }
+    },
+    {
+      "id": "links-check-5",
+      "kind": "links_check",
+      "urls": [
+        "http://fixtures.test/plain",
+        "http://fixtures.test/article",
+        "http://fixtures.test/blocked"
+      ],
+      "prompt": "Summarize the reachability of the three sources.",
+      "max_calls": 3,
+      "expect_url_status": {
+        "http://fixtures.test/plain": "ok",
+        "http://fixtures.test/article": "ok",
+        "http://fixtures.test/blocked": "blocked"
+      }
+    },
+    {
+      "id": "pagination-1",
+      "kind": "pagination",
+      "url": "http://fixtures.test/long",
+      "needle": "TANDEM-77",
+      "prompt": "Find the codename of the storage subsystem in the long report (past the first chunk).",
+      "max_calls": 40,
+      "expect_contains": [
+        "TANDEM-77",
+        "4192"
+      ]
+    },
+    {
+      "id": "pagination-2",
+      "kind": "pagination",
+      "url": "http://fixtures.test/long",
+      "needle": "TANDEM-77",
+      "prompt": "How many entries did TANDEM-77 store before the failure? Read to the end if needed.",
+      "max_calls": 40,
+      "expect_contains": [
+        "4192"
+      ]
+    },
+    {
+      "id": "pagination-3",
+      "kind": "pagination",
+      "url": "http://fixtures.test/long",
+      "needle": "TANDEM-77",
+      "prompt": "Locate the sentence that mentions TANDEM-77 in the long report.",
+      "max_calls": 40,
+      "expect_contains": [
+        "stored 4192 entries"
+      ]
+    },
+    {
+      "id": "pagination-4",
+      "kind": "pagination",
+      "url": "http://fixtures.test/long",
+      "needle": "TANDEM-77",
+      "prompt": "The long report mentions a storage subsystem failure. Report its codename.",
+      "max_calls": 40,
+      "expect_contains": [
+        "TANDEM-77"
+      ]
+    },
+    {
+      "id": "pagination-5",
+      "kind": "pagination",
+      "url": "http://fixtures.test/long",
+      "needle": "TANDEM-77",
+      "prompt": "Read the long report to the end and quote the critical finding.",
+      "max_calls": 40,
+      "expect_contains": [
+        "critical finding reads"
+      ]
+    },
+    {
+      "id": "blocked-source-1",
+      "kind": "blocked_source",
+      "url": "http://fixtures.test/blocked",
+      "prompt": "Read the blocked fixture page and report the outcome.",
+      "max_calls": 2,
+      "expect_status": "blocked"
+    },
+    {
+      "id": "blocked-source-2",
+      "kind": "blocked_source",
+      "url": "http://fixtures.test/blocked",
+      "prompt": "Try to fetch http://fixtures.test/blocked and say if it is blocked.",
+      "max_calls": 2,
+      "expect_status": "blocked"
+    },
+    {
+      "id": "blocked-source-3",
+      "kind": "blocked_source",
+      "url": "http://fixtures.test/gone",
+      "prompt": "Fetch the gone fixture page and report what happened.",
+      "max_calls": 2,
+      "expect_status": "not_found"
+    }
+  ]
+}
