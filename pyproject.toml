@@ -13,6 +13,7 @@ dependencies = [
     "mcp",
     "pydantic",
     "pydantic-settings",
+    "pypdf>=7.0.0",
     "python-multipart>=0.0.33",
     "trafilatura",
     "uvicorn",

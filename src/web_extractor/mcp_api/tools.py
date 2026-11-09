@@ -17,6 +17,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
+from web_extractor.domain.content_quality import ContentQuality, assess_content
 from web_extractor.domain.ttl import parse_iso_utc
 from web_extractor.domain.types import (
     AgentId,
@@ -28,6 +29,7 @@ from web_extractor.domain.types import (
     TaskId,
     ToolName,
 )
+from web_extractor.domain.urls import UrlParseError, parse_normalized_url
 from web_extractor.mcp_api.formatting import (
     chunk_line,
     cursor_line,
@@ -46,6 +48,10 @@ from web_extractor.service.search import find_matches
 from web_extractor.service.types import FetchOutcome, ServiceRequest
 
 logger = logging.getLogger("web_extractor.mcp")
+
+_CHECK_FORMAT: PageFormat = "markdown"
+"""check_urls measures the same text fetch_page returns by default, so the length
+and ``text_version`` of a checked URL match a following ``fetch_page`` call."""
 
 
 class ToolContext(Context[object, object]):
@@ -139,6 +145,9 @@ class MatchRow(BaseModel):
 
     offset: int
     verbatim: bool
+    before: str
+    match: str
+    after: str
 
 
 class UrlRow(BaseModel):
@@ -150,6 +159,9 @@ class UrlRow(BaseModel):
     final_url: str | None = None
     title: str | None = None
     text_chars: int | None = None
+    text_version: str | None = None
+    text_format: PageFormat | None = None
+    content_quality: ContentQuality | None = None
     source: str
     error_kind: str | None = None
 
@@ -165,6 +177,7 @@ class ToolMeta(BaseModel):
     from_cache: bool = False
     fetcher: str | None = None
     text_version: str | None = None
+    text_format: PageFormat | None = None
     chars_start: int | None = None
     chars_end: int | None = None
     chars_total: int | None = None
@@ -173,6 +186,8 @@ class ToolMeta(BaseModel):
     title: str | None = None
     author: str | None = None
     published_at: str | None = None
+    published_source: str | None = None
+    content_quality: ContentQuality | None = None
     matches: tuple[MatchRow, ...] | None = None
     url_rows: tuple[UrlRow, ...] | None = None
     summary: str | None = None
@@ -297,7 +312,9 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
     if outcome.metadata.title is not None:
         lines.append(f"title: {outcome.metadata.title}")
     if outcome.metadata.published_at is not None:
-        lines.append(f"published: {outcome.metadata.published_at}")
+        source = outcome.metadata.published_source
+        suffix = f" ({source})" if source is not None else ""
+        lines.append(f"published: {outcome.metadata.published_at}{suffix}")
     lines.append(_source_line(outcome, now))
     if detail == "detailed":
         lines.append(f"http_status: {outcome.http_status}")
@@ -495,7 +512,9 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         else None
     )
     lines = _header_lines(outcome, args.detail, deps.clock.now())
-    lines.append(f"text_version: {text_version_short(text)}")
+    quality = assess_content(text)
+    lines.append(f"content: {quality}")
+    lines.append(f"text_version: {text_version_short(text)} ({args.page_format})")
     lines.append(chunk_line(0, min(total, args.max_chars), total))
     if cursor_id is not None:
         lines.append(cursor_line(cursor_id))
@@ -510,6 +529,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         from_cache=outcome.from_cache,
         fetcher=outcome.fetcher,
         text_version=text_version_short(text),
+        text_format=args.page_format,
         chars_start=0,
         chars_end=min(total, args.max_chars),
         chars_total=total,
@@ -518,6 +538,8 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         title=outcome.metadata.title,
         author=outcome.metadata.author,
         published_at=outcome.metadata.published_at,
+        published_source=outcome.metadata.published_source,
+        content_quality=quality,
     )
     return _text_response(meta, "\n".join(lines))
 
@@ -555,6 +577,7 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 url=read.state.url_key,
                 from_cache=True,
                 text_version=read.state.text_sha256[:8],
+                text_format=read.state.format,
                 chars_start=read.state.offset,
                 chars_end=read.state.offset + len(read.slice_text),
                 chars_total=read.total_chars,
@@ -627,8 +650,10 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
         max_matches=args.max_matches,
     )
     version = text_version_short(text)
+    quality = assess_content(text)
     lines = _header_lines(outcome, "concise", deps.clock.now())
-    lines.append(f"text_version: {version}")
+    lines.append(f"content: {quality}")
+    lines.append(f"text_version: {version} (text)")
     lines.append(f"matches: {len(matches)}")
     if not matches:
         lines.append(
@@ -654,8 +679,19 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
         final_url=outcome.final_url,
         from_cache=outcome.from_cache,
         text_version=version,
+        text_format="text",
         chars_total=len(text),
-        matches=tuple(MatchRow(offset=match.offset, verbatim=match.verbatim) for match in matches),
+        matches=tuple(
+            MatchRow(
+                offset=match.offset,
+                verbatim=match.verbatim,
+                before=match.before,
+                match=match.match,
+                after=match.after,
+            )
+            for match in matches
+        ),
+        content_quality=quality,
         title=outcome.metadata.title,
     )
     return _text_response(meta, "\n".join(lines))
@@ -668,7 +704,7 @@ async def _check_urls(deps: McpToolDeps, args: _CheckUrlsArgs) -> CallToolResult
             raw_url=args.urls[0] if args.urls else "",
             fresh=args.fresh,
             render=args.render,
-            page_format="text",
+            page_format=_CHECK_FORMAT,
             detail="concise",
             agent=args.agent,
             task=args.task,
@@ -678,32 +714,49 @@ async def _check_urls(deps: McpToolDeps, args: _CheckUrlsArgs) -> CallToolResult
         message = f"urls must contain 1..{_MAX_URLS} items, got {len(args.urls)}"
         return await _rejected(deps, request, "invalid_argument", message)
 
+    unique_urls = _unique_urls(args.urls)
+    duplicates = len(args.urls) - len(unique_urls)
     requests = [
         _service_request(
             raw_url=raw_url,
             fresh=args.fresh,
             render=args.render,
-            page_format="text",
+            page_format=_CHECK_FORMAT,
             detail="concise",
             agent=args.agent,
             task=args.task,
             tool="check_urls",
             mcp_session_id=args.mcp_session_id,
         )
-        for raw_url in args.urls
+        for raw_url in unique_urls
     ]
     outcomes = list(await asyncio.gather(*(deps.service.fetch(request) for request in requests)))
 
     rows: list[UrlRow] = []
     lines: list[str] = ["check_urls results:"]
-    for number, (raw_url, outcome) in enumerate(zip(args.urls, outcomes, strict=True), start=1):
+    for number, (raw_url, outcome) in enumerate(zip(unique_urls, outcomes, strict=True), start=1):
         lines.append(_check_row(number, raw_url, outcome))
         rows.append(_check_row_meta(outcome))
     summary = _summary_line(outcomes)
     lines.append(f"summary: {summary}")
+    if duplicates:
+        lines.append(f"note: {duplicates} duplicate URL(s) skipped; each URL was checked once")
 
     meta = ToolMeta(status="ok", url=args.urls[0], url_rows=tuple(rows), summary=summary)
     return _text_response(meta, "\n".join(lines))
+
+
+def _unique_urls(urls: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop repeated URLs (compared after normalization), keeping first-seen order."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for raw_url in urls:
+        parsed = parse_normalized_url(raw_url)
+        key = raw_url.strip() if isinstance(parsed, UrlParseError) else parsed.value
+        if key not in seen:
+            seen.add(key)
+            unique.append(raw_url)
+    return tuple(unique)
 
 
 def _check_row(number: int, raw_url: str, outcome: FetchOutcome) -> str:
@@ -715,7 +768,12 @@ def _check_row(number: int, raw_url: str, outcome: FetchOutcome) -> str:
     if outcome.status == "ok":
         title = (outcome.metadata.title or "")[:80]
         source = "cache" if outcome.from_cache else "network"
-        row += f" | {title} | {len(outcome.text or '')} chars | {source}"
+        text = outcome.text or ""
+        row += (
+            f" | {title} | {len(text)} chars"
+            f" | text_version={text_version_short(text)} ({_CHECK_FORMAT})"
+            f" | content={assess_content(text)} | {source}"
+        )
     elif outcome.error_message:
         row += f" - {outcome.error_message}"
     return row
@@ -730,6 +788,9 @@ def _check_row_meta(outcome: FetchOutcome) -> UrlRow:
         final_url=outcome.final_url,
         title=outcome.metadata.title,
         text_chars=len(outcome.text) if outcome.text is not None else None,
+        text_version=text_version_short(outcome.text) if outcome.text is not None else None,
+        text_format=_CHECK_FORMAT if outcome.text is not None else None,
+        content_quality=assess_content(outcome.text) if outcome.text is not None else None,
         source="cache" if outcome.from_cache else "network",
         error_kind=outcome.error_kind,
     )

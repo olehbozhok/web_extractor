@@ -100,3 +100,44 @@ async def test_render_auto_skips_browser_on_good_static(browser_harness: Service
 
     assert outcome.status == "ok"
     assert len(browser_harness.browser_fetcher.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_browser_render_does_not_reuse_a_static_cache_entry(
+    browser_harness: ServiceHarness,
+) -> None:
+    """A cached static result must not satisfy an explicit browser request."""
+    browser_harness.fetcher.script(fetched_ok(normalized(_URL)))
+    browser_harness.extractor.script(
+        Extracted(text="static text", format="text", metadata=PageMetadata())
+    )
+    await browser_harness.service.fetch(service_request(_URL, render="static", page_format="text"))
+    browser_harness.browser_fetcher.script(fetched_ok(normalized(_URL)))
+    browser_harness.extractor.script(
+        Extracted(text="rendered text", format="text", metadata=PageMetadata())
+    )
+
+    outcome = await browser_harness.service.fetch(
+        service_request(_URL, render="browser", page_format="text")
+    )
+
+    assert outcome.text == "rendered text"
+    assert len(browser_harness.browser_fetcher.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_browser_cache_entry_serves_static_and_auto_requests(
+    browser_harness: ServiceHarness,
+) -> None:
+    browser_harness.browser_fetcher.script(fetched_ok(normalized(_URL)))
+    browser_harness.extractor.script(
+        Extracted(text="rendered text", format="text", metadata=PageMetadata())
+    )
+    await browser_harness.service.fetch(service_request(_URL, render="browser", page_format="text"))
+
+    outcome = await browser_harness.service.fetch(
+        service_request(_URL, render="auto", page_format="text")
+    )
+
+    assert outcome.text == "rendered text"
+    assert len(browser_harness.fetcher.calls) == 0

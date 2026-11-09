@@ -17,9 +17,11 @@ _FRESH_PREFIX = "fresh:"
 """Prefix separating the fresh-task key space from the shared one."""
 
 
-def flight_key(url_key: str, *, fresh: bool) -> str:
-    """The single-flight key for a URL under the fresh/non-fresh rule."""
-    return f"{_FRESH_PREFIX}{url_key}" if fresh else url_key
+def flight_key(url_key: str, *, fresh: bool, browser: bool = False) -> str:
+    """The single-flight key: fresh and explicit-browser requests never share a flight
+    with ordinary ones (a browser render must not join a static fetch in progress)."""
+    key = f"{_FRESH_PREFIX}{url_key}" if fresh else url_key
+    return f"browser:{key}" if browser else key
 
 
 @dataclass(frozen=True, slots=True)

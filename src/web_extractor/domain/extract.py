@@ -13,6 +13,10 @@ type ExtractionFailureKind = Literal[
 """``empty``: no content found; ``needs_js``: markers of a JS-only page;
 ``parse_error``: HTML could not be processed."""
 
+type DateSource = Literal["json_ld", "meta", "url", "text"]
+"""Where the publication date was found (a heuristic hint, see
+``extractors/date_source.py``)."""
+
 type ExtractResult = Extracted | ExtractionFailure
 """Result of an extraction attempt: success or an expected failure value."""
 
@@ -25,6 +29,8 @@ class PageMetadata:
     author: str | None = None
     published_at: str | None = None
     """Publication date as provided by the extractor (ISO-like when present)."""
+    published_source: DateSource | None = None
+    """Provenance of ``published_at``; None exactly when the date is None."""
     language: str | None = None
     publisher: str | None = None
 
