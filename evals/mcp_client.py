@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -53,11 +54,28 @@ class FixtureFetcher:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ToolSpec:
+    """A tool as advertised over MCP: name, description, JSON input schema."""
+
+    name: str
+    description: str
+    input_schema: dict[str, object]
+
+
 class McpToolClient:
     """ToolClient over a real MCP session against the composed app."""
 
     def __init__(self, session: ClientSession) -> None:
         self._session = session
+
+    async def specs(self) -> tuple[ToolSpec, ...]:
+        """The tools exactly as the server advertises them to a model."""
+        listed = await self._session.list_tools()
+        return tuple(
+            ToolSpec(tool.name, tool.description or "", dict(tool.input_schema))
+            for tool in listed.tools
+        )
 
     async def call(self, tool: str, arguments: Mapping[str, object]) -> ToolOutcome:
         result = await self._session.call_tool(tool, dict(arguments))

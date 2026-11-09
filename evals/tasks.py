@@ -46,6 +46,8 @@ class TaskResult:
     tool_errors: int
     duration_s: float
     reason: str
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +79,14 @@ class EvalReport:
     @property
     def tool_errors(self) -> int:
         return sum(result.tool_errors for result in self.results)
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(result.input_tokens for result in self.results)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(result.output_tokens for result in self.results)
 
     @property
     def total_duration_s(self) -> float:
