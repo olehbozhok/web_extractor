@@ -88,7 +88,9 @@ CREATE TABLE cache_pages (
   text           TEXT,
   metadata_json  TEXT NOT NULL,
   error_kind     TEXT,
-  error_message  TEXT
+  error_message  TEXT,
+  text_format    TEXT,                  -- формат збереженого тексту (міграція 002)
+  content_type   TEXT                   -- заявлений медіатип відповіді (міграція 003)
 );
 
 CREATE TABLE cursors (            -- короткі курсори пагінації для MCP (docs/03, 3.3)

@@ -21,7 +21,7 @@ from web_extractor.storage.rows import (
 _GET_QUERY = (
     "SELECT url_key, final_url, status, http_status, fetcher, fetched_at, "
     "expires_at, content_sha256, html, text, text_format, metadata_json, "
-    "error_kind, error_message FROM cache_pages WHERE url_key = ?"
+    "error_kind, error_message, content_type FROM cache_pages WHERE url_key = ?"
 )
 """Column list is a fixed constant, never built from input (S608)."""
 
@@ -46,8 +46,8 @@ class CacheRepository:
             INSERT INTO cache_pages (
                 url_key, final_url, status, http_status, fetcher, fetched_at,
                 expires_at, content_sha256, html, text, text_format,
-                metadata_json, error_kind, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                metadata_json, error_kind, error_message, content_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url_key) DO UPDATE SET
                 final_url = excluded.final_url,
                 status = excluded.status,
@@ -61,7 +61,8 @@ class CacheRepository:
                 text_format = excluded.text_format,
                 metadata_json = excluded.metadata_json,
                 error_kind = excluded.error_kind,
-                error_message = excluded.error_message
+                error_message = excluded.error_message,
+                content_type = excluded.content_type
         """
         await self._database.connection.execute(
             query,
@@ -80,6 +81,7 @@ class CacheRepository:
                 record.metadata_json,
                 record.error_kind,
                 record.error_message,
+                record.content_type,
             ),
         )
         await self._database.connection.commit()
@@ -91,7 +93,7 @@ class CacheRepository:
         query = (
             "SELECT url_key, final_url, status, http_status, fetcher, fetched_at, "
             "expires_at, content_sha256, html, text, text_format, metadata_json, "
-            "error_kind, error_message FROM cache_pages"
+            "error_kind, error_message, content_type FROM cache_pages"
         )
         params: list[str] = []
         if domain is not None:
@@ -142,6 +144,7 @@ def _record_from_row(row: sqlite3.Row) -> PageRecord:
         metadata_json=as_str(row_value(row, "metadata_json"), "metadata_json"),
         error_kind=_opt_error_kind(row),
         error_message=as_opt_str(row_value(row, "error_message"), "error_message"),
+        content_type=as_opt_str(row_value(row, "content_type"), "content_type"),
     )
 
 

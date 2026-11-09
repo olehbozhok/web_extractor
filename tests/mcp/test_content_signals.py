@@ -1,5 +1,7 @@
 """Content verdict, date provenance, error kinds and check_urls details (docs/03, 3.5)."""
 
+from dataclasses import replace
+
 import pytest
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, TextContent
@@ -191,3 +193,37 @@ async def test_find_in_page_can_search_markdown_and_names_the_mode(mcp: McpHarne
     text = _text_of(result)
     assert "(markdown)" in text.split("text_version:")[1].splitlines()[0]
     assert "(case-insensitive)" in text
+
+
+@pytest.mark.asyncio
+async def test_document_kind_is_sniffed_and_declared_type_shown_when_detailed(
+    mcp: McpHarness,
+) -> None:
+    """A PDF served as text/html: document says pdf, content_type shows the label."""
+    fetched = fetched_ok(normalized(_URL), b"%PDF-1.4 fake body")
+    mislabeled = replace(fetched, headers={"Content-Type": "text/html; charset=utf-8"})
+    mcp.fetcher.script(mislabeled)
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    concise = await _call(mcp, "fetch_page", {"url": _URL})
+    detailed = await _call(mcp, "fetch_page", {"url": _URL, "detail": "detailed"})
+
+    assert "document: pdf" in _text_of(concise)
+    assert concise.structured_content is not None
+    assert concise.structured_content["document"] == "pdf"
+    assert concise.structured_content["content_type"] is None  # only when detailed
+    assert "content_type: text/html" in _text_of(detailed)
+    assert detailed.structured_content is not None
+    assert detailed.structured_content["content_type"] == "text/html"
+
+
+@pytest.mark.asyncio
+async def test_check_urls_rows_carry_the_document_kind(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    result = await _call(mcp, "check_urls", {"urls": [_URL]})
+
+    assert "document=html" in _text_of(result)
+    assert result.structured_content is not None
+    assert result.structured_content["url_rows"][0]["document"] == "html"

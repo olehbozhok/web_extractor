@@ -18,6 +18,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
 from web_extractor.domain.content_quality import ContentQuality, assess_content
+from web_extractor.domain.content_type import DocumentKind
 from web_extractor.domain.ttl import parse_iso_utc
 from web_extractor.domain.types import (
     AgentId,
@@ -166,6 +167,7 @@ class UrlRow(BaseModel):
     text_chars: int | None = None
     text_version: str | None = None
     text_format: PageFormat | None = None
+    document: DocumentKind | None = None
     content_quality: ContentQuality | None = None
     source: str
     error_kind: str | None = None
@@ -190,6 +192,8 @@ class ToolMeta(BaseModel):
     cursor: str | None = None
     title: str | None = None
     author: str | None = None
+    document: DocumentKind | None = None
+    content_type: str | None = None
     content_quality: ContentQuality | None = None
     matches: tuple[MatchRow, ...] | None = None
     total_matches: int | None = None
@@ -316,10 +320,13 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
     lines.append(url_line)
     if outcome.metadata.title is not None:
         lines.append(f"title: {outcome.metadata.title}")
+    if outcome.document is not None:
+        lines.append(f"document: {outcome.document}")
     lines.append(_source_line(outcome, now))
     if detail == "detailed":
         lines.append(f"http_status: {outcome.http_status}")
         lines.append(f"fetcher: {outcome.fetcher}")
+        lines.append(f"content_type: {outcome.content_type or 'unknown'}")
         if outcome.content_sha256 is not None:
             lines.append(f"content_sha256: {outcome.content_sha256}")
     return lines
@@ -551,6 +558,8 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         cursor=cursor_id,
         title=outcome.metadata.title,
         author=outcome.metadata.author,
+        document=outcome.document,
+        content_type=outcome.content_type if args.detail == "detailed" else None,
         content_quality=quality,
     )
     return _text_response(meta, "\n".join(lines))
@@ -574,6 +583,8 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
     match read:
         case CursorText():
             lines = ["status: ok", f"url: {read.state.url_key}", "source: cache"]
+            if read.document is not None:
+                lines.append(f"document: {read.document}")
             lines.append(
                 chunk_line(
                     read.state.offset,
@@ -597,6 +608,7 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 cursor=read.next_cursor_id,
                 title=read.metadata.title,
                 author=read.metadata.author,
+                document=read.document,
                 content_quality=read.content_quality,
             )
             await deps.service.journal_read(
@@ -726,6 +738,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
         content_quality=quality,
         total_matches=total,
         title=outcome.metadata.title,
+        document=outcome.document,
     )
     return _text_response(meta, "\n".join(lines))
 
@@ -805,7 +818,7 @@ def _check_row(number: int, raw_url: str, outcome: FetchOutcome) -> str:
         row += (
             f" | {title} | {len(text)} chars"
             f" | text_version={text_version_short(text)} ({outcome.text_format})"
-            f" | content={assess_content(text)} | {source}"
+            f" | content={assess_content(text)} | document={outcome.document} | {source}"
         )
     elif outcome.error_message:
         row += f" - {outcome.error_message}"
@@ -823,6 +836,7 @@ def _check_row_meta(outcome: FetchOutcome) -> UrlRow:
         text_chars=len(outcome.text) if outcome.text is not None else None,
         text_version=text_version_short(outcome.text) if outcome.text is not None else None,
         text_format=outcome.text_format,
+        document=outcome.document,
         content_quality=assess_content(outcome.text) if outcome.text is not None else None,
         source="cache" if outcome.from_cache else "network",
         error_kind=outcome.error_kind,

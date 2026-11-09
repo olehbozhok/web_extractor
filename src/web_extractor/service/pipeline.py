@@ -17,6 +17,7 @@ import json
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 
+from web_extractor.domain.content_type import header_value, media_type, sniff_document
 from web_extractor.domain.extract import (
     Extracted,
     ExtractionFailure,
@@ -344,6 +345,8 @@ class FetchService:
             content_sha256=record.content_sha256,
             error_kind=record.error_kind,
             error_message=record.error_message,
+            document=sniff_document(record.html) if record.html is not None else None,
+            content_type=record.content_type,
         )
 
     def _record_for_fetched(
@@ -389,6 +392,7 @@ class FetchService:
             metadata_json=metadata_json,
             error_kind=error_kind,
             error_message=error_message,
+            content_type=media_type(header_value(fetched.headers, "content-type")) or None,
         )
 
     def _failure_record(

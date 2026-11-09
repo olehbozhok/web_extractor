@@ -9,7 +9,7 @@ from web_extractor.storage.database import Database
 
 _TABLES_EXPECTED = {"cache_pages", "cursors", "events", "schema_version"}
 
-_LATEST_VERSION = 2
+_LATEST_VERSION = 3
 """The newest bundled migration; bump when adding 003_...sql."""
 
 
