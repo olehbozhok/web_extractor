@@ -231,3 +231,31 @@ async def test_event_row_fields_are_complete(harness: ServiceHarness) -> None:
     assert isinstance(row["queue_ms"], int) and row["queue_ms"] >= 0
     assert row["content_sha256"] == sha_of(_BODY_1)
     assert row["bytes"] == len(_BODY_1)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_for_different_formats_each_get_their_own(
+    harness: ServiceHarness,
+) -> None:
+    """A joiner of another format must not receive the leader's text unlabeled-wrong."""
+    harness.fetcher.gated = True
+    harness.fetcher.script(fetched_ok(normalized(_URL), _BODY_1))
+    harness.extractor.script(extracted("plain text"))  # the leader's extraction
+    harness.extractor.script(extracted("**markdown text**", page_format="markdown"))  # re-extract
+
+    leader = asyncio.create_task(
+        harness.service.fetch(service_request(_URL, page_format="text", request_id="req-1"))
+    )
+    await harness.fetcher.entered.wait()
+    joiner = asyncio.create_task(
+        harness.service.fetch(service_request(_URL, page_format="markdown", request_id="req-2"))
+    )
+    harness.fetcher.release.set()
+    leader_outcome, joiner_outcome = await asyncio.gather(leader, joiner)
+
+    assert len(harness.fetcher.calls) == 1  # still one network fetch
+    assert (leader_outcome.text, leader_outcome.text_format) == ("plain text", "text")
+    assert (joiner_outcome.text, joiner_outcome.text_format) == (
+        "**markdown text**",
+        "markdown",
+    )

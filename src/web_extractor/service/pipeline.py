@@ -172,6 +172,7 @@ class FetchService:
             flight_key(url.value, fresh=request.fresh, browser=request.render == "browser"),
             lambda: self._fetch_extract_store(url, request),
         )
+        outcome = await self._in_requested_format(url, request, flight_result.outcome)
         metrics = (
             _RequestMetrics(
                 queue_ms=flight_result.queue_ms,
@@ -181,8 +182,23 @@ class FetchService:
             if started_by_self
             else _RequestMetrics(queue_ms=0, cache_hit=True, size_bytes=None)
         )
-        await self._append_event(request, flight_result.outcome, started, metrics)
-        return flight_result.outcome
+        await self._append_event(request, outcome, started, metrics)
+        return outcome
+
+    async def _in_requested_format(
+        self, url: NormalizedUrl, request: ServiceRequest, outcome: FetchOutcome
+    ) -> FetchOutcome:
+        """Single-flight shares one fetch between requests, but the shared outcome
+        carries the leader's text format. A joiner that asked for another format
+        gets the page re-extracted from the cached HTML in its own format."""
+        if outcome.status != "ok" or outcome.text_format == request.page_format:
+            return outcome
+        record = await self._cache.get(url.value)
+        if record is None:
+            return outcome
+        return await self._outcome_from_record(
+            record, request.page_format, from_cache=outcome.from_cache
+        )
 
     async def _fetch_extract_store(
         self, url: NormalizedUrl, request: ServiceRequest

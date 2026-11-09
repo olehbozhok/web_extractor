@@ -9,6 +9,12 @@ cursors stay valid.
 """
 
 from dataclasses import dataclass
+from typing import Literal
+
+type MatchKind = Literal["exact", "case_differs", "normalized"]
+"""``exact``: the span equals the query character for character; ``case_differs``:
+the same characters, only letter case differs; ``normalized``: matched only after
+whitespace, quote or dash normalization (possibly with case differences too)."""
 
 _WHITESPACE_CHARS = frozenset(" \t\r\n\u00a0\u202f")
 _QUOTE_MAP = str.maketrans(
@@ -45,7 +51,10 @@ class SearchMatch:
     after: str
     """Up to ``context_chars`` original characters after the match."""
     verbatim: bool
-    """True when the original span equals the query exactly."""
+    """True when the original span equals the query exactly (same as ``kind == 'exact'``)."""
+    kind: MatchKind
+    """How the span relates to the query; ``verbatim=False`` alone does not say
+    whether the quote is merely differently cased or differently punctuated."""
 
 
 def find_matches(
@@ -151,4 +160,13 @@ def _to_match(
         match=span,
         after=text[end : end + context_chars],
         verbatim=span == query,
+        kind=_match_kind(span, query),
     )
+
+
+def _match_kind(span: str, query: str) -> MatchKind:
+    if span == query:
+        return "exact"
+    if span.casefold() == query.casefold():
+        return "case_differs"
+    return "normalized"
