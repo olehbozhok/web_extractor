@@ -1,0 +1,10 @@
+# Keep the build context small and free of secrets and local data.
+.git
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+data
+docs
+tests
+check.sh

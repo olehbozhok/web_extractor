@@ -1,0 +1,19 @@
+# The whole stack for stage 1: the core service only. The browser service
+# (Crawl4AI) arrives in stage 3 (docs/04_plan.md, M11-M12).
+#
+# The port is published on 127.0.0.1 only: the service must never be
+# reachable from other machines (01_requirements.md, section 5).
+services:
+  core:
+    build:
+      context: .
+      dockerfile: docker/core.Dockerfile
+    image: web-extractor-core:0.1.0
+    ports:
+      - "127.0.0.1:8321:8321"
+    volumes:
+      - core-data:/data
+    restart: unless-stopped
+
+volumes:
+  core-data:
