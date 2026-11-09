@@ -120,5 +120,11 @@ select = [
     "PLR0917",
     "A002",
 ]
+"src/web_extractor/config.py" = [
+    # The host literal includes "0.0.0.0" for running inside a container,
+    # where compose publishes the port on the host's 127.0.0.1; the security
+    # decision is documented on the field itself (docs/02, section 7.1).
+    "S104",
+]
 
 
