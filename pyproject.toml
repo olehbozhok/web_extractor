@@ -47,6 +47,13 @@ plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
 python_version = "3.13"
 
+[[tool.mypy.overrides]]
+# The MCP SDK does not maintain re-export discipline (__all__), so importing
+# its public helpers (e.g. create_mcp_http_client) needs implicit reexport
+# for this dependency only.
+module = "mcp.*"
+implicit_reexport = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "strict"
@@ -104,6 +111,14 @@ select = [
     # signature (with a `timeout` parameter) is fixed by the httpcore API;
     # ASYNC109's asyncio.timeout advice does not apply to overrides.
     "ASYNC109",
+]
+"src/web_extractor/mcp_api/tools.py" = [
+    # MCP tool signatures are the public API contract (docs/03): argument
+    # names and shapes are fixed, so arg-count and builtin-shadowing rules
+    # do not apply to the registered tool functions.
+    "PLR0913",
+    "PLR0917",
+    "A002",
 ]
 
 
