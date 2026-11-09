@@ -255,3 +255,22 @@ async def test_no_date_line_without_a_structured_date(mcp: McpHarness) -> None:
     assert "published:" not in _text_of(page)
     assert page.structured_content is not None
     assert page.structured_content["published_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_every_page_reporting_tool_gives_the_date_the_same_way(mcp: McpHarness) -> None:
+    metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="meta")
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
+    mcp.extractor.script(Extracted(text=_LONG, format="text", metadata=metadata))
+
+    checked = await _call(mcp, "check_urls", {"urls": [_URL]})
+    found = await _call(mcp, "find_in_page", {"url": _URL, "query": "sentence"})
+
+    assert "published=2026-03-01 (meta)" in _text_of(checked)
+    assert checked.structured_content is not None
+    row = checked.structured_content["url_rows"][0]
+    assert (row["published_at"], row["published_source"]) == ("2026-03-01", "meta")
+    assert "published: 2026-03-01 (meta)" in _text_of(found)
+    assert found.structured_content is not None
+    assert found.structured_content["published_source"] == "meta"

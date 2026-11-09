@@ -34,8 +34,20 @@ _LD = '<script type="application/ld+json">{body}</script>'
         (
             '<time itemprop="datePublished" datetime="2026-03-01">1 March</time>',
             "2026-03-01",
-            "time_itemprop",
+            "time",
         ),
+        (
+            '<meta name="article:published_time" content="2026-03-01T10:00:00Z">',
+            "2026-03-01T10:00:00+00:00",
+            "meta",
+        ),
+        ('<meta name="pubdate" content="2026-03-01">', "2026-03-01", "meta"),
+        (
+            '<meta name="parsely-pub-date" content="2026-03-01T10:00:00Z">',
+            "2026-03-01T10:00:00+00:00",
+            "meta",
+        ),
+        ('<time pubdate datetime="2026-03-01">1 March</time>', "2026-03-01", "time"),
         # Same day from two sources: the higher-priority source is reported.
         (
             _LD.format(body='{"@type": "Article", "datePublished": "2026-03-01T08:00:00Z"}')
@@ -58,6 +70,7 @@ def test_structured_sources(*, html: str, value: str, source: PublishedSource) -
         "<p>Published on January 1, 2026</p>",  # text only: never guessed
         '<time datetime="2026-01-01">Jan 1</time>',  # bare <time>: comments, sidebars
         '<meta property="article:modified_time" content="2026-03-02">',  # modification date
+        '<meta name="date" content="2026-03-02">',  # ambiguous: often the modification date
         _LD.format(body='{"@type": "Article", "dateModified": "2026-03-02"}'),
         _LD.format(body='{"@type": "WebSite", "datePublished": "2020-01-01"}'),  # not an article
         _LD.format(body='{"@type": "Article", "datePublished": "yesterday"}'),  # not a date

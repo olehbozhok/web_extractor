@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from web_extractor.domain.content_quality import ContentQuality, assess_content
 from web_extractor.domain.content_type import DocumentKind
+from web_extractor.domain.extract import PageMetadata
 from web_extractor.domain.ttl import parse_iso_utc
 from web_extractor.domain.types import (
     AgentId,
@@ -169,6 +170,8 @@ class UrlRow(BaseModel):
     text_format: PageFormat | None = None
     document: DocumentKind | None = None
     content_quality: ContentQuality | None = None
+    published_at: str | None = None
+    published_source: str | None = None
     source: str
     error_kind: str | None = None
 
@@ -322,10 +325,9 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
     lines.append(url_line)
     if outcome.metadata.title is not None:
         lines.append(f"title: {outcome.metadata.title}")
-    if outcome.metadata.published_at is not None:
-        lines.append(
-            f"published: {outcome.metadata.published_at} ({outcome.metadata.published_source})"
-        )
+    published = _published_text(outcome.metadata)
+    if published is not None:
+        lines.append(f"published: {published}")
     if outcome.document is not None:
         lines.append(f"document: {outcome.document}")
     lines.append(_source_line(outcome, now))
@@ -336,6 +338,13 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
         if outcome.content_sha256 is not None:
             lines.append(f"content_sha256: {outcome.content_sha256}")
     return lines
+
+
+def _published_text(metadata: PageMetadata) -> str | None:
+    """``<date> (<source>)`` for every tool that reports a page, or None."""
+    if metadata.published_at is None:
+        return None
+    return f"{metadata.published_at} ({metadata.published_source})"
 
 
 def register_tools(server: MCPServer[object], deps: McpToolDeps) -> None:
@@ -750,6 +759,8 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
         content_quality=quality,
         total_matches=total,
         title=outcome.metadata.title,
+        published_at=outcome.metadata.published_at,
+        published_source=outcome.metadata.published_source,
         document=outcome.document,
     )
     return _text_response(meta, "\n".join(lines))
@@ -830,8 +841,12 @@ def _check_row(number: int, raw_url: str, outcome: FetchOutcome) -> str:
         row += (
             f" | {title} | {len(text)} chars"
             f" | text_version={text_version_short(text)} ({outcome.text_format})"
-            f" | content={assess_content(text)} | document={outcome.document} | {source}"
+            f" | content={assess_content(text)} | document={outcome.document}"
         )
+        published = _published_text(outcome.metadata)
+        if published is not None:
+            row += f" | published={published}"
+        row += f" | {source}"
     elif outcome.error_message:
         row += f" - {outcome.error_message}"
     return row
@@ -850,6 +865,8 @@ def _check_row_meta(outcome: FetchOutcome) -> UrlRow:
         text_format=outcome.text_format,
         document=outcome.document,
         content_quality=assess_content(outcome.text) if outcome.text is not None else None,
+        published_at=outcome.metadata.published_at,
+        published_source=outcome.metadata.published_source,
         source="cache" if outcome.from_cache else "network",
         error_kind=outcome.error_kind,
     )

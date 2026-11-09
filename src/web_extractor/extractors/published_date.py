@@ -6,9 +6,10 @@ date is taken only where the site states it machine-readably:
 
 1. JSON-LD ``datePublished`` on an article-like object (``Article``,
    ``NewsArticle``, ``BlogPosting``, ...);
-2. ``<meta property="article:published_time">`` or
-   ``<meta itemprop="datePublished">``;
-3. ``<time itemprop="datePublished" datetime="...">``.
+2. a meta tag whose ``property``, ``name`` or ``itemprop`` names the publication
+   date (``article:published_time``, ``datePublished``, ``pubdate``, ...);
+3. ``<time datetime="...">`` marked as the publication time: ``itemprop=
+   "datePublished"`` or the HTML ``pubdate`` attribute.
 
 A bare ``<time datetime>`` is not used: pages carry many of them (comments,
 "updated", related articles). Modification dates are never used. A value must
@@ -44,10 +45,26 @@ _ARTICLE_TYPES: Final = frozenset(
 )
 """schema.org types whose ``datePublished`` is the publication of the page's content."""
 
-_META_KEYS: Final = frozenset({"article:published_time", "datepublished"})
-"""``property`` / ``itemprop`` values of meta tags that carry the publication date."""
+_META_KEYS: Final = frozenset(
+    {
+        "article:published_time",
+        "og:article:published_time",
+        "datepublished",
+        "pubdate",
+        "publishdate",
+        "publish-date",
+        "publish_date",
+        "parsely-pub-date",
+        "sailthru.date",
+        "dc.date.issued",
+        "dcterms.issued",
+    }
+)
+"""Lowercase ``property`` / ``name`` / ``itemprop`` values of meta tags that name the
+publication date. Ambiguous keys (``date``, ``dc.date``, ``last-modified``) are
+left out on purpose: they are as often a modification date."""
 
-_PRIORITY: Final[tuple[PublishedSource, ...]] = ("json_ld", "meta", "time_itemprop")
+_PRIORITY: Final[tuple[PublishedSource, ...]] = ("json_ld", "meta", "time")
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +91,7 @@ def find_published_date(html: str) -> PublishedDate | None:
         ("meta", parsed) for parsed in map(_parse_iso, collector.meta_values) if parsed
     )
     candidates.extend(
-        ("time_itemprop", parsed) for parsed in map(_parse_iso, collector.time_values) if parsed
+        ("time", parsed) for parsed in map(_parse_iso, collector.time_values) if parsed
     )
     if not candidates:
         return None
@@ -89,7 +106,7 @@ def find_published_date(html: str) -> PublishedDate | None:
 
 
 class _Collector(HTMLParser):
-    """Collects JSON-LD blocks, publication meta values and time[itemprop] values."""
+    """Collects JSON-LD blocks, publication meta values and publication <time> values."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -107,11 +124,17 @@ class _Collector(HTMLParser):
             self._in_json_ld = True
             self._buffer = []
         elif tag == "meta":
-            key = (attributes.get("property") or attributes.get("itemprop") or "").lower()
+            keys = {
+                attributes.get(name, "").strip().lower()
+                for name in ("property", "name", "itemprop")
+            }
             content = attributes.get("content")
-            if key in _META_KEYS and content:
+            if content and keys & _META_KEYS:
                 self.meta_values.append(content)
-        elif tag == "time" and attributes.get("itemprop", "").lower() == "datepublished":
+        elif tag == "time" and (
+            attributes.get("itemprop", "").strip().lower() == "datepublished"
+            or "pubdate" in attributes
+        ):
             value = attributes.get("datetime")
             if value:
                 self.time_values.append(value)

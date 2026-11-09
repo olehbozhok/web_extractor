@@ -14,7 +14,7 @@ type ExtractionFailureKind = Literal[
 """``empty``: no content found; ``needs_js``: markers of a JS-only page;
 ``parse_error``: HTML could not be processed."""
 
-type PublishedSource = Literal["json_ld", "meta", "time_itemprop"]
+type PublishedSource = Literal["json_ld", "meta", "time"]
 """Structured markup the publication date was read from
 (``extractors/published_date.py``); nothing else is trusted."""
 
@@ -97,8 +97,8 @@ def _published_source(data: dict[str, object]) -> PublishedSource | None:
             return "json_ld"
         case "meta":
             return "meta"
-        case "time_itemprop":
-            return "time_itemprop"
+        case "time":
+            return "time"
         case _:
             return None
 
