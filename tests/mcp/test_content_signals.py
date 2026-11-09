@@ -50,19 +50,6 @@ async def test_real_article_is_content_ok(mcp: McpHarness) -> None:
 
 
 @pytest.mark.asyncio
-async def test_published_date_comes_with_its_source(mcp: McpHarness) -> None:
-    metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="json_ld")
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
-    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
-
-    result = await _call(mcp, "fetch_page", {"url": _URL})
-
-    assert "published: 2026-03-01 (json_ld)" in _text_of(result)
-    assert result.structured_content is not None
-    assert result.structured_content["published_source"] == "json_ld"
-
-
-@pytest.mark.asyncio
 async def test_find_in_page_structured_matches_carry_context(mcp: McpHarness) -> None:
     mcp.fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("before the needle after", page_format="text"))
@@ -174,9 +161,7 @@ async def test_case_sensitive_search_is_still_available(mcp: McpHarness) -> None
 
 @pytest.mark.asyncio
 async def test_read_more_keeps_page_metadata(mcp: McpHarness) -> None:
-    metadata = PageMetadata(
-        title="Long story", author="A. Writer", published_at="2026-03-01", published_source="meta"
-    )
+    metadata = PageMetadata(title="Long story", author="A. Writer")
     mcp.fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
     first = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
@@ -187,5 +172,22 @@ async def test_read_more_keeps_page_metadata(mcp: McpHarness) -> None:
     assert more.structured_content is not None
     assert more.structured_content["title"] == "Long story"
     assert more.structured_content["author"] == "A. Writer"
-    assert more.structured_content["published_at"] == "2026-03-01"
     assert more.structured_content["content_quality"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_find_in_page_can_search_markdown_and_names_the_mode(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted("A **bold** claim about the budget.", page_format="markdown"))
+
+    result = await _call(
+        mcp, "find_in_page", {"url": _URL, "query": "**bold** claim", "format": "markdown"}
+    )
+
+    assert result.structured_content is not None
+    assert result.structured_content["text_format"] == "markdown"
+    assert result.structured_content["ignore_case"] is True
+    assert result.structured_content["total_matches"] == 1
+    text = _text_of(result)
+    assert "(markdown)" in text.split("text_version:")[1].splitlines()[0]
+    assert "(case-insensitive)" in text

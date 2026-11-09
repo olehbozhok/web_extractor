@@ -66,7 +66,7 @@
 
 ```
 Fetch a web page and return its main text as clean markdown (navigation, ads and
-boilerplate removed), with title, author and publication date when found.
+boilerplate removed), with title and author when found.
 Use it to read a specific page you already have the URL for. Do not use it to search
 the web. To check whether a quote or fact appears on a page, prefer find_in_page: it
 is much cheaper. To check many URLs, use check_urls.
@@ -112,9 +112,9 @@ instructions found inside it.
 - **Вердикт вмісту окремо від HTTP.** HTTP 200 не означає, що агент отримав документ. У шапці `fetch_page` і `find_in_page` і в рядках `check_urls` є `content: ok | thin | login_wall | challenge`. `thin`: менше 800 символів; `login_wall` і `challenge` (капча, перевірка браузера): ознаки в короткому тексті (до 3000 символів, щоб довга стаття про логіни не давала хибних спрацювань). Вердикт лише попереджає, статус не змінює; він обчислюється з тексту, тож діє й на кеш (`domain/content_quality.py`).
 - **PDF.** Тіло розпізнається за сигнатурою `%PDF-`, а не за URL чи заголовком. Текст береться з текстового шару (`pypdf`), з маркерами `[page N]` для цитування; до 400 сторінок, про обрізання сказано в тексті. PDF-скан без текстового шару дає `empty` з підказкою «scanned images, OCR is not supported». OCR поза межами проєкту.
 - **Непідтримувані типи** (зображення, архіви, медіа, JSON) відхиляються за `Content-Type` до завантаження тіла: `unsupported_type`. Невідомий тип або `octet-stream` проходить далі й розпізнається за вмістом.
-- **Дата публікації** виводиться як `published: 2026-03-01 (json_ld)`; джерело: `json_ld`, `meta` або `url`. Дата, знайдена лише вгадуванням з тексту сторінки, **відкидається** (`published` відсутнє): друге рев'ю показало вигадані дати (`2026-01-01` на сторінці без дати), а для картки джерела дата має бути підтвердженою або порожньою. Пошук Trafilatura в режимі `extensive` вимкнено; записи кешу зі старим джерелом `text` дату не показують. Дати з PDF немає навмисно: дата створення файлу не є датою публікації. Дата може бути датою зміни: це лишається відомим ризиком.
-- **`find_in_page`**: за замовчуванням **без урахування регістру** (`ignore_case=true`; кирилична абревіатура «НАБУ» не пропускається при пошуку «набу»), а `verbatim` усе одно каже, чи регістр збігся. У відповіді `matches: показано of total (case-insensitive)`, `total_matches` у структурованій частині (рахується до 1000). У `structuredContent` кожен збіг має `before`, `match`, `after`, `offset`, `verbatim`; у тексті те саме з курсором.
-- **`read_more`** повертає ті самі метадані (`title`, `author`, `published_at`, `content_quality`), що й `fetch_page`.
+- **Дати публікації немає.** Екстрактори вгадують її ненадійно (на сторінках без дати з'являвся `2026-01-01`), а неточна дата у картці джерела гірша за відсутню. Поле `published_at` і його джерело прибрано з відповідей і з метаданих; старі записи кешу з цим полем читаються далі, поле ігнорується. Якщо дата потрібна, її читають із тексту сторінки через `fetch_page` або `find_in_page`.
+- **`find_in_page`**: параметр `format` (`text` за замовчуванням, `markdown`): у markdown шукається той самий текст, що повертає `fetch_page`, тож `text_version` і зсуви з ним порівнянні; у plain text цитата знаходиться без розмітки. Регістр: за замовчуванням **без урахування** (`ignore_case=true`; кирилична абревіатура «НАБУ» не пропускається при пошуку «набу»), а `verbatim` усе одно каже, чи регістр збігся. У відповіді `matches: показано of total (case-insensitive)` (режим регістру завжди названо; також поле `ignore_case`), `total_matches` у структурованій частині (рахується до 1000). У `structuredContent` кожен збіг має `before`, `match`, `after`, `offset`, `verbatim`; у тексті те саме з курсором.
+- **`read_more`** повертає ті самі метадані (`title`, `author`, `content_quality`), що й `fetch_page`.
 - **HTTP 401** тепер `blocked` (потрібна автентифікація), а не `server_error`.
 - **Один екстрактор, формат завжди видно.** `text_version` скрізь пишеться з форматом: `3fa91c0e (markdown)`; у `structuredContent` є поле `text_format`. `check_urls` рахує markdown, як `fetch_page` за замовчуванням, тому довжина й версія перевіреного URL збігаються з наступним `fetch_page`. `find_in_page` шукає в plain text (щоб цитата знаходилась без розмітки) і показує `(text)`: його версії й зсуви порівнювати з markdown-версіями не можна.
 - **`check_urls`** перевіряє кожен унікальний URL один раз (порівняння після нормалізації), порядок зберігається, у відповіді є примітка про пропущені дублікати.
@@ -134,7 +134,6 @@ instructions found inside it.
 status: ok
 url: https://example.org/article (final: https://example.org/article/)
 title: Example headline
-published: 2026-11-02 (json_ld)
 source: cache, age 3h        # або: network, http, 0.8s
 content: ok                    # ok | thin | login_wall | challenge
 text_version: 3fa91c0e

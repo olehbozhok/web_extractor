@@ -121,6 +121,7 @@ class _FindInPageArgs:
 
     url: str
     query: str
+    page_format: PageFormat
     ignore_case: bool
     context_chars: int
     max_matches: int
@@ -188,11 +189,10 @@ class ToolMeta(BaseModel):
     cursor: str | None = None
     title: str | None = None
     author: str | None = None
-    published_at: str | None = None
-    published_source: str | None = None
     content_quality: ContentQuality | None = None
     matches: tuple[MatchRow, ...] | None = None
     total_matches: int | None = None
+    ignore_case: bool | None = None
     url_rows: tuple[UrlRow, ...] | None = None
     summary: str | None = None
     error_kind: str | None = None
@@ -315,10 +315,6 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
     lines.append(url_line)
     if outcome.metadata.title is not None:
         lines.append(f"title: {outcome.metadata.title}")
-    if outcome.metadata.published_at is not None:
-        source = outcome.metadata.published_source
-        suffix = f" ({source})" if source is not None else ""
-        lines.append(f"published: {outcome.metadata.published_at}{suffix}")
     lines.append(_source_line(outcome, now))
     if detail == "detailed":
         lines.append(f"http_status: {outcome.http_status}")
@@ -341,8 +337,8 @@ def _register_fetch_page(server: MCPServer[object], deps: McpToolDeps) -> None:
         name="fetch_page",
         description=(
             "Fetch a web page and return its main text as clean markdown "
-            "(navigation, ads and boilerplate removed), with title, author and "
-            "publication date when found. Use it to read a specific page you "
+            "(navigation, ads and boilerplate removed), with title and author "
+            "when found. Use it to read a specific page you "
             "already have the URL for. Do not use it to search the web. To check "
             "whether a quote or fact appears on a page, prefer find_in_page: it "
             "is much cheaper. To check many URLs at once, use check_urls.\n\n"
@@ -410,7 +406,11 @@ def _register_find_in_page(server: MCPServer[object], deps: McpToolDeps) -> None
             "matching passages with surrounding context. Reports whether each "
             "match is verbatim or matched only after normalizing whitespace, "
             "quotes and dashes. Use it to verify that a source says what is "
-            "claimed without reading the whole page."
+            "claimed without reading the whole page. Matching ignores letter case by "
+            "default (set ignore_case=false to match case exactly); the response "
+            "states the mode. Searches plain text by default; format=markdown "
+            "searches the same text fetch_page returns, so text_version and "
+            "offsets are comparable with it."
         ),
         annotations=_TOOL_ANNOTATIONS,
     )
@@ -418,6 +418,7 @@ def _register_find_in_page(server: MCPServer[object], deps: McpToolDeps) -> None
         url: str,
         query: Annotated[str, Field(min_length=1, max_length=2000)],
         *,
+        format: Literal["text", "markdown"] = "text",
         ignore_case: bool = True,
         context_chars: Annotated[int, Field(ge=0, le=1000)] = 200,
         max_matches: Annotated[int, Field(ge=1, le=20)] = 5,
@@ -431,6 +432,7 @@ def _register_find_in_page(server: MCPServer[object], deps: McpToolDeps) -> None
         args = _FindInPageArgs(
             url=url,
             query=query,
+            page_format=format,
             ignore_case=ignore_case,
             context_chars=context_chars,
             max_matches=max_matches,
@@ -541,8 +543,6 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         cursor=cursor_id,
         title=outcome.metadata.title,
         author=outcome.metadata.author,
-        published_at=outcome.metadata.published_at,
-        published_source=outcome.metadata.published_source,
         content_quality=quality,
     )
     return _text_response(meta, "\n".join(lines))
@@ -589,8 +589,6 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 cursor=read.next_cursor_id,
                 title=read.metadata.title,
                 author=read.metadata.author,
-                published_at=read.metadata.published_at,
-                published_source=read.metadata.published_source,
                 content_quality=read.content_quality,
             )
             await deps.service.journal_read(
@@ -630,12 +628,12 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
 
 
 async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolResult:
-    """find_in_page implementation: search the text-format extraction."""
+    """find_in_page implementation: search the chosen text format (plain text by default)."""
     request = _service_request(
         raw_url=args.url,
         fresh=args.fresh,
         render=args.render,
-        page_format="text",
+        page_format=args.page_format,
         detail="concise",
         agent=args.agent,
         task=args.task,
@@ -662,7 +660,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
     quality = assess_content(text)
     lines = _header_lines(outcome, "concise", deps.clock.now())
     lines.append(f"content: {quality}")
-    lines.append(f"text_version: {version} (text)")
+    lines.append(f"text_version: {version} ({args.page_format})")
     total = len(
         find_matches(
             text,
@@ -685,7 +683,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
             cursor_id = await deps.cursors.issue(
                 outcome.url,
                 text,
-                "text",
+                args.page_format,
                 offset=match.offset,
                 max_chars=deps.default_max_chars,
             )
@@ -698,7 +696,8 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
         final_url=outcome.final_url,
         from_cache=outcome.from_cache,
         text_version=version,
-        text_format="text",
+        text_format=args.page_format,
+        ignore_case=args.ignore_case,
         chars_total=len(text),
         matches=tuple(
             MatchRow(

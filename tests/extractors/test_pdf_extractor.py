@@ -25,7 +25,6 @@ async def test_pdf_text_and_metadata_are_extracted() -> None:
     assert "[page 2]" in result.text
     assert result.metadata.title == "Court ruling"
     assert result.metadata.author == "Registry"
-    assert result.metadata.published_at is None
 
 
 @pytest.mark.asyncio

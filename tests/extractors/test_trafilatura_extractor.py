@@ -45,7 +45,6 @@ async def test_extract_text_with_metadata() -> None:
     # trafilatura may prefer the h1 over the <title>; both carry the heading.
     assert result.metadata.title is not None and "Heading" in result.metadata.title
     assert result.metadata.author == "Jane Doe"
-    assert result.metadata.published_at == "2026-01-05"
 
 
 @pytest.mark.asyncio
