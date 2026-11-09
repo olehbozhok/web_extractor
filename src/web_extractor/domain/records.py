@@ -39,6 +39,8 @@ class PageRecord:
     metadata_json: str
     error_kind: ErrorKind | None
     error_message: str | None
+    content_type: str | None = None
+    """Declared media type (lowercase, no parameters); None when absent or unknown."""
 
 
 @dataclass(frozen=True, slots=True)

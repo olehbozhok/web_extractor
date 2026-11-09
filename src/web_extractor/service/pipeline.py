@@ -17,13 +17,13 @@ import json
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 
+from web_extractor.domain.content_type import header_value, media_type, sniff_document
 from web_extractor.domain.extract import (
-    DateSource,
     Extracted,
     ExtractionFailure,
     ExtractionFailureKind,
     ExtractResult,
-    PageMetadata,
+    parse_metadata_json,
 )
 from web_extractor.domain.fetch import (
     Fetched,
@@ -173,6 +173,7 @@ class FetchService:
             flight_key(url.value, fresh=request.fresh, browser=request.render == "browser"),
             lambda: self._fetch_extract_store(url, request),
         )
+        outcome = await self._in_requested_format(url, request, flight_result.outcome)
         metrics = (
             _RequestMetrics(
                 queue_ms=flight_result.queue_ms,
@@ -182,8 +183,23 @@ class FetchService:
             if started_by_self
             else _RequestMetrics(queue_ms=0, cache_hit=True, size_bytes=None)
         )
-        await self._append_event(request, flight_result.outcome, started, metrics)
-        return flight_result.outcome
+        await self._append_event(request, outcome, started, metrics)
+        return outcome
+
+    async def _in_requested_format(
+        self, url: NormalizedUrl, request: ServiceRequest, outcome: FetchOutcome
+    ) -> FetchOutcome:
+        """Single-flight shares one fetch between requests, but the shared outcome
+        carries the leader's text format. A joiner that asked for another format
+        gets the page re-extracted from the cached HTML in its own format."""
+        if outcome.status != "ok" or outcome.text_format == request.page_format:
+            return outcome
+        record = await self._cache.get(url.value)
+        if record is None:
+            return outcome
+        return await self._outcome_from_record(
+            record, request.page_format, from_cache=outcome.from_cache
+        )
 
     async def _fetch_extract_store(
         self, url: NormalizedUrl, request: ServiceRequest
@@ -325,10 +341,12 @@ class FetchService:
             fetcher=record.fetcher,
             text=text if record.status == "ok" else None,
             text_format=text_format if record.status == "ok" else None,
-            metadata=_parse_metadata(record.metadata_json),
+            metadata=parse_metadata_json(record.metadata_json),
             content_sha256=record.content_sha256,
             error_kind=record.error_kind,
             error_message=record.error_message,
+            document=sniff_document(record.html) if record.html is not None else None,
+            content_type=record.content_type,
         )
 
     def _record_for_fetched(
@@ -374,6 +392,7 @@ class FetchService:
             metadata_json=metadata_json,
             error_kind=error_kind,
             error_message=error_message,
+            content_type=media_type(header_value(fetched.headers, "content-type")) or None,
         )
 
     def _failure_record(
@@ -518,33 +537,3 @@ def _error_kind_for_extraction(kind: ExtractionFailureKind) -> ErrorKind:
             return "needs_browser"
         case "parse_error":
             return "internal"
-
-
-def _parse_metadata(raw: str) -> PageMetadata:
-    """Parse stored metadata JSON; anything malformed degrades to empty."""
-    data: object = json.loads(raw)
-    if not isinstance(data, dict):
-        return PageMetadata()
-    return PageMetadata(
-        title=_opt_str(data, "title"),
-        author=_opt_str(data, "author"),
-        published_at=_opt_str(data, "published_at"),
-        published_source=_date_source(data),
-        language=_opt_str(data, "language"),
-        publisher=_opt_str(data, "publisher"),
-    )
-
-
-def _date_source(data: dict[str, object]) -> DateSource | None:
-    """The stored date provenance; unknown values degrade to None."""
-    value = data.get("published_source")
-    match value:
-        case "json_ld" | "meta" | "url" | "text":
-            return value
-        case _:
-            return None
-
-
-def _opt_str(data: dict[str, object], key: str) -> str | None:
-    value = data.get(key)
-    return value if isinstance(value, str) else None

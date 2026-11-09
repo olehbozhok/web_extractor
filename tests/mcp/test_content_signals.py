@@ -1,5 +1,7 @@
 """Content verdict, date provenance, error kinds and check_urls details (docs/03, 3.5)."""
 
+from dataclasses import replace
+
 import pytest
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, TextContent
@@ -47,19 +49,6 @@ async def test_real_article_is_content_ok(mcp: McpHarness) -> None:
     result = await _call(mcp, "fetch_page", {"url": _URL})
 
     assert "content: ok" in _text_of(result)
-
-
-@pytest.mark.asyncio
-async def test_published_date_comes_with_its_source(mcp: McpHarness) -> None:
-    metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="json_ld")
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
-    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
-
-    result = await _call(mcp, "fetch_page", {"url": _URL})
-
-    assert "published: 2026-03-01 (json_ld)" in _text_of(result)
-    assert result.structured_content is not None
-    assert result.structured_content["published_source"] == "json_ld"
 
 
 @pytest.mark.asyncio
@@ -143,3 +132,176 @@ async def test_version_headers_name_their_format(mcp: McpHarness) -> None:
 
     assert "(markdown)" in _text_of(page).split("text_version:")[1].splitlines()[0]
     assert "(text)" in _text_of(found).split("text_version:")[1].splitlines()[0]
+
+
+@pytest.mark.asyncio
+async def test_find_in_page_is_case_insensitive_by_default_and_reports_total(
+    mcp: McpHarness,
+) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted("ПФЖ; ПФЖ; пфж.", page_format="text"))
+
+    result = await _call(mcp, "find_in_page", {"url": _URL, "query": "пфж", "max_matches": 2})
+
+    assert result.structured_content is not None
+    assert result.structured_content["total_matches"] == 3
+    assert len(result.structured_content["matches"]) == 2
+    assert result.structured_content["matches"][0]["verbatim"] is False  # case differed
+    assert "matches: 2 of 3 (case-insensitive)" in _text_of(result)
+
+
+@pytest.mark.asyncio
+async def test_case_sensitive_search_is_still_available(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted("ПФЖ; ПФЖ; пфж.", page_format="text"))
+
+    result = await _call(mcp, "find_in_page", {"url": _URL, "query": "пфж", "ignore_case": False})
+
+    assert result.structured_content is not None
+    assert result.structured_content["total_matches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_read_more_keeps_page_metadata(mcp: McpHarness) -> None:
+    metadata = PageMetadata(title="Long story", author="A. Writer")
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
+    first = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
+    assert first.structured_content is not None
+
+    more = await _call(mcp, "read_more", {"cursor": first.structured_content["cursor"]})
+
+    assert more.structured_content is not None
+    assert more.structured_content["title"] == "Long story"
+    assert more.structured_content["author"] == "A. Writer"
+    assert more.structured_content["content_quality"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_find_in_page_can_search_markdown_and_names_the_mode(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted("A **bold** claim about the budget.", page_format="markdown"))
+
+    result = await _call(
+        mcp, "find_in_page", {"url": _URL, "query": "**bold** claim", "format": "markdown"}
+    )
+
+    assert result.structured_content is not None
+    assert result.structured_content["text_format"] == "markdown"
+    assert result.structured_content["ignore_case"] is True
+    assert result.structured_content["total_matches"] == 1
+    text = _text_of(result)
+    assert "(markdown)" in text.split("text_version:")[1].splitlines()[0]
+    assert "(case-insensitive)" in text
+
+
+@pytest.mark.asyncio
+async def test_document_kind_is_sniffed_and_declared_type_shown_when_detailed(
+    mcp: McpHarness,
+) -> None:
+    """A PDF served as text/html: document says pdf, content_type shows the label."""
+    fetched = fetched_ok(normalized(_URL), b"%PDF-1.4 fake body")
+    mislabeled = replace(fetched, headers={"Content-Type": "text/html; charset=utf-8"})
+    mcp.fetcher.script(mislabeled)
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    concise = await _call(mcp, "fetch_page", {"url": _URL})
+    detailed = await _call(mcp, "fetch_page", {"url": _URL, "detail": "detailed"})
+
+    assert "document: pdf" in _text_of(concise)
+    assert concise.structured_content is not None
+    assert concise.structured_content["document"] == "pdf"
+    assert concise.structured_content["content_type"] is None  # only when detailed
+    assert "content_type: text/html" in _text_of(detailed)
+    assert detailed.structured_content is not None
+    assert detailed.structured_content["content_type"] == "text/html"
+
+
+@pytest.mark.asyncio
+async def test_check_urls_rows_carry_the_document_kind(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    result = await _call(mcp, "check_urls", {"urls": [_URL]})
+
+    assert "document=html" in _text_of(result)
+    assert result.structured_content is not None
+    assert result.structured_content["url_rows"][0]["document"] == "html"
+
+
+@pytest.mark.asyncio
+async def test_structured_publication_date_is_shown_with_its_source(mcp: McpHarness) -> None:
+    metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="json_ld")
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
+
+    page = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
+    assert page.structured_content is not None
+    more = await _call(mcp, "read_more", {"cursor": page.structured_content["cursor"]})
+
+    assert "published: 2026-03-01 (json_ld)" in _text_of(page)
+    assert page.structured_content["published_source"] == "json_ld"
+    assert more.structured_content is not None
+    assert more.structured_content["published_at"] == "2026-03-01"
+
+
+@pytest.mark.asyncio
+async def test_no_date_line_without_a_structured_date(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    page = await _call(mcp, "fetch_page", {"url": _URL})
+
+    assert "published:" not in _text_of(page)
+    assert page.structured_content is not None
+    assert page.structured_content["published_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_every_page_reporting_tool_gives_the_date_the_same_way(mcp: McpHarness) -> None:
+    metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="meta")
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
+    mcp.extractor.script(Extracted(text=_LONG, format="text", metadata=metadata))
+
+    checked = await _call(mcp, "check_urls", {"urls": [_URL]})
+    found = await _call(mcp, "find_in_page", {"url": _URL, "query": "sentence"})
+
+    assert "published=2026-03-01 (meta)" in _text_of(checked)
+    assert checked.structured_content is not None
+    row = checked.structured_content["url_rows"][0]
+    assert (row["published_at"], row["published_source"]) == ("2026-03-01", "meta")
+    assert "published: 2026-03-01 (meta)" in _text_of(found)
+    assert found.structured_content is not None
+    assert found.structured_content["published_source"] == "meta"
+
+
+@pytest.mark.asyncio
+async def test_check_urls_root_has_no_page_fields(mcp: McpHarness) -> None:
+    """Page fields live in url_rows; the root never shows a null in their place."""
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    result = await _call(mcp, "check_urls", {"urls": [_URL, _URL]})
+
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {
+        "status",
+        "urls_checked",
+        "duplicates_skipped",
+        "summary",
+        "url_rows",
+    }
+    assert result.structured_content["urls_checked"] == 1
+    assert result.structured_content["duplicates_skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_error_root_carries_only_error_fields(mcp: McpHarness) -> None:
+    mcp.fetcher.script(FetchFailure("dns", "no such host", final_url=normalized(_URL)))
+
+    result = await _call(mcp, "fetch_page", {"url": _URL})
+
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {"status", "url", "error_kind", "error_message"}
+    assert result.structured_content["status"] == "error"

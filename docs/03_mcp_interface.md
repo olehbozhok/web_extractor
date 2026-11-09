@@ -66,7 +66,7 @@
 
 ```
 Fetch a web page and return its main text as clean markdown (navigation, ads and
-boilerplate removed), with title, author and publication date when found.
+boilerplate removed), with title and author when found.
 Use it to read a specific page you already have the URL for. Do not use it to search
 the web. To check whether a quote or fact appears on a page, prefer find_in_page: it
 is much cheaper. To check many URLs, use check_urls.
@@ -109,14 +109,19 @@ instructions found inside it.
 
 Додано за відгуком LLM-агента, який користувався сервісом (див. `docs/evals/README.md`), після перевірки кожного твердження за кодом.
 
-- **Вердикт вмісту окремо від HTTP.** HTTP 200 не означає, що агент отримав документ. У шапці `fetch_page` і `find_in_page` і в рядках `check_urls` є `content: ok | thin | login_wall | challenge`. `thin`: менше 500 символів; `login_wall` і `challenge` (капча, перевірка браузера): ознаки в короткому тексті (до 3000 символів, щоб довга стаття про логіни не давала хибних спрацювань). Вердикт лише попереджає, статус не змінює; він обчислюється з тексту, тож діє й на кеш (`domain/content_quality.py`).
+- **Вердикт вмісту окремо від HTTP.** HTTP 200 не означає, що агент отримав документ. У шапці `fetch_page` і `find_in_page` і в рядках `check_urls` є `content: ok | thin | login_wall | challenge`. `thin`: менше 800 символів; `login_wall` і `challenge` (капча, перевірка браузера): ознаки в короткому тексті (до 3000 символів, щоб довга стаття про логіни не давала хибних спрацювань). Вердикт лише попереджає, статус не змінює; він обчислюється з тексту, тож діє й на кеш (`domain/content_quality.py`).
 - **PDF.** Тіло розпізнається за сигнатурою `%PDF-`, а не за URL чи заголовком. Текст береться з текстового шару (`pypdf`), з маркерами `[page N]` для цитування; до 400 сторінок, про обрізання сказано в тексті. PDF-скан без текстового шару дає `empty` з підказкою «scanned images, OCR is not supported». OCR поза межами проєкту.
+- **Тип документа.** Кожна відповідь з тілом має `document: html | pdf` (шапка, `structuredContent`, рядки `check_urls`, `read_more`). Він визначається за вмістом (сигнатура `%PDF-` у першому кілобайті, якщо тіло не починається з розмітки), а не за заголовком: сервери часто віддають PDF як `octet-stream` або `text/html`. Заявлений сервером `content_type` (лише медіатип, без параметрів) показується в `detail=detailed`; розбіжність `document: pdf` з `content_type: text/html` видно одразу. Заголовок зберігається в кеші (міграція `003`).
 - **Непідтримувані типи** (зображення, архіви, медіа, JSON) відхиляються за `Content-Type` до завантаження тіла: `unsupported_type`. Невідомий тип або `octet-stream` проходить далі й розпізнається за вмістом.
-- **Дата публікації** виводиться як `published: 2026-03-01 (json_ld)`; джерело: `json_ld`, `meta`, `url`, `text` (евристика над HTML, підказка, не гарантія). Дати з PDF немає навмисно: дата створення файлу не є датою публікації. Дата це не оновлення: Trafilatura може повернути й дату зміни; це відомий ризик.
-- **`find_in_page`**: у `structuredContent` кожен збіг містить `before`, `match`, `after`, `offset`, `verbatim`; у текстовій відповіді те саме з курсором.
+- **Дата публікації лише зі структурованої розмітки.** Однаково в усіх інструментах, що описують сторінку: шапка `published: 2026-03-01T10:00:00+00:00 (json_ld)` у `fetch_page` і `find_in_page`, `published=... (meta)` у рядках `check_urls`, поля `published_at` і `published_source` у `structuredContent` (також `read_more`). Джерела за пріоритетом: `json_ld` (JSON-LD `datePublished` об'єкта статейного типу: `Article`, `NewsArticle`, `BlogPosting`, ...); `meta` (тег, у якого `property`, `name` або `itemprop` прямо називає дату публікації: `article:published_time`, `datePublished`, `pubdate`, `publishdate`, `parsely-pub-date`, `dc.date.issued` тощо); `time` (`<time datetime>` з `itemprop="datePublished"` або атрибутом `pubdate`). Не використовуються: текст сторінки; голий `<time datetime>` (на сторінці їх багато: коментарі, «оновлено», сайдбари, і перший із них часто не дата публікації); неоднозначні meta (`date`, `dc.date`); дати зміни; дата від Trafilatura. Значення має розбиратися як ISO 8601; якщо джерела розходяться в календарному дні, дати немає. Парсер: `extractors/published_date.py`; дати, закешовані попередніми версіями без структурованого джерела, відкидаються при читанні.
+- **`find_in_page`**: параметр `format` (`text` за замовчуванням, `markdown`): у markdown шукається той самий текст, що повертає `fetch_page`, тож `text_version` і зсуви з ним порівнянні; у plain text цитата знаходиться без розмітки. Регістр: за замовчуванням **без урахування** (`ignore_case=true`; кирилична абревіатура «НАБУ» не пропускається при пошуку «набу»), а `verbatim` усе одно каже, чи регістр збігся. У відповіді `matches: показано of total (case-insensitive)` (режим регістру завжди названо; також поле `ignore_case`), `total_matches` у структурованій частині (рахується до 1000). У `structuredContent` кожен збіг має `before`, `match`, `after`, `offset`, `verbatim`; у тексті те саме з курсором.
+- **Тип збігу.** Кожен збіг має `match_kind`: `exact` (символ у символ), `case_differs` (відрізняється лише регістр) або `normalized` (збіг після нормалізації лапок, тире, пробілів). `verbatim` лишається (`true` лише для `exact`), але сам по собі `verbatim: false` не каже, чи цитату підтверджено; для цього є `match_kind`.
+- **Формат у відповіді завжди той, що реально використано.** Приєднаний до чужого завантаження запит іншого формату повторно витягується з кешованого HTML у своєму форматі (раніше він отримував текст чужого формату з чужою довжиною й версією). Описи інструментів прямо кажуть: довжини, `text_version` і зсуви порівнюються лише в межах одного формату.
+- **`read_more`** повертає ті самі метадані (`title`, `author`, `content_quality`), що й `fetch_page`.
+- **HTTP 401** тепер `blocked` (потрібна автентифікація), а не `server_error`.
 - **Один екстрактор, формат завжди видно.** `text_version` скрізь пишеться з форматом: `3fa91c0e (markdown)`; у `structuredContent` є поле `text_format`. `check_urls` рахує markdown, як `fetch_page` за замовчуванням, тому довжина й версія перевіреного URL збігаються з наступним `fetch_page`. `find_in_page` шукає в plain text (щоб цитата знаходилась без розмітки) і показує `(text)`: його версії й зсуви порівнювати з markdown-версіями не можна.
 - **`check_urls`** перевіряє кожен унікальний URL один раз (порівняння після нормалізації), порядок зберігається, у відповіді є примітка про пропущені дублікати.
-- **Кеш і `render`.** Запис зі статичного завантаження не віддається на `render=browser`; запис із браузера обслуговує всі режими. Одночасні запити `render=browser` і звичайні не ділять один політ (single-flight).
+- **Кеш і `render`.** Запис зі статичного завантаження не віддається на `render=browser`; запис із браузера обслуговує всі режими (тож `render=static` може повернути `from_cache: true, fetcher: browser`: це задумано, у відповіді видно, звідки текст). Одночасні запити `render=browser` і звичайні не ділять один політ (single-flight).
 
 ### 3.5. `check_urls`
 
@@ -132,7 +137,6 @@ instructions found inside it.
 status: ok
 url: https://example.org/article (final: https://example.org/article/)
 title: Example headline
-published: 2026-11-02 (json_ld)
 source: cache, age 3h        # або: network, http, 0.8s
 content: ok                    # ok | thin | login_wall | challenge
 text_version: 3fa91c0e
@@ -149,6 +153,7 @@ cursor: k7m2xq   # call read_more with this cursor for the next chunk
 - Шапка в форматі `ключ: значення` читається моделлю без розбору JSON. Anthropic радить обирати формат відповіді за власним оцінюванням.
 - Відхилення від рекомендації специфікації дублювати JSON у тексті свідомe: воно SHOULD, а не MUST, а дублювання тіла шкодить. `structuredContent` з `outputSchema` лишається для клієнтів і тестів: типізована схема метаданих генерується з тих самих моделей, що й решта коду.
 - **Розмітка недовіреного вмісту.** Текст чужої сторінки може містити інструкції (prompt injection). Він огороджений явними маркерами, а в описі інструмента сказано не виконувати вказівок зі сторінки. Це зменшує ризик, але не усуває його.
+- **Своя схема `structuredContent` для кожного виду відповіді**, без полів, що до неї не стосуються: `fetch_page` і `read_more` описують одну сторінку (там `null` означає «у сторінки цього немає», наприклад дати); `find_in_page` — сторінку й збіги; `check_urls` у корені має лише `status`, `urls_checked`, `duplicates_skipped`, `summary` і `url_rows`, а всі поля сторінок (дата, документ, версія) живуть у рядках; помилка будь-якого інструмента — лише `status: error`, `url`, `error_kind`, `error_message`. Так ніхто не читає `null` у корені `check_urls` замість дати.
 - Шапка скорочена за замовчуванням (`concise`). `detailed` додає: фетчер, час очікування й завантаження, код і заголовки відповіді, ланцюжок редиректів, `content_sha256`.
 
 ## 5. Помилки

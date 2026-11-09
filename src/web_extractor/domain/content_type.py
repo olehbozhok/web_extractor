@@ -7,7 +7,15 @@ allowed through: servers often mislabel PDFs, and the extractor sniffs the
 body itself.
 """
 
-from typing import Final
+from collections.abc import Mapping
+from typing import Final, Literal
+
+type DocumentKind = Literal["html", "pdf"]
+"""What the body actually is, sniffed from its bytes (never from headers or URL)."""
+
+PDF_SIGNATURE: Final = b"%PDF-"
+SNIFF_BYTES: Final = 1024
+"""The PDF spec tolerates junk before the signature within the first kilobyte."""
 
 _SUPPORTED_EXACT: Final = frozenset(
     {
@@ -35,3 +43,24 @@ def is_supported_content_type(header: str | None) -> bool:
     """True when the declared type is extractable or unknown (then sniffed)."""
     declared = media_type(header)
     return declared == "" or declared in _SUPPORTED_EXACT
+
+
+def sniff_document(body: bytes) -> DocumentKind:
+    """``pdf`` when the body carries the PDF signature near its start, else ``html``.
+
+    A body that starts with markup (``<``, after whitespace) is HTML even if the
+    signature appears in its first kilobyte: a page may mention ``%PDF-`` in text.
+    """
+    head = body[:SNIFF_BYTES]
+    if head.lstrip().startswith(b"<"):
+        return "html"
+    return "pdf" if PDF_SIGNATURE in head else "html"
+
+
+def header_value(headers: Mapping[str, str], name: str) -> str | None:
+    """A header by case-insensitive name (fetchers do not normalize key case)."""
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None

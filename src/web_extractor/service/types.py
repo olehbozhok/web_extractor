@@ -6,6 +6,7 @@ describes one pipeline run over one URL, success or failure.
 
 from dataclasses import dataclass, field
 
+from web_extractor.domain.content_type import DocumentKind
 from web_extractor.domain.extract import PageMetadata
 from web_extractor.domain.types import (
     AgentId,
@@ -60,3 +61,7 @@ class FetchOutcome:
     content_sha256: str | None = None
     error_kind: ErrorKind | None = None
     error_message: str | None = None
+    document: DocumentKind | None = None
+    """What the body is (sniffed), None when there is no body (fetch errors)."""
+    content_type: str | None = None
+    """The media type the server declared; may disagree with ``document``."""
