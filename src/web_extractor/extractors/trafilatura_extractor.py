@@ -16,6 +16,7 @@ from web_extractor.domain.extract import (
     PageMetadata,
 )
 from web_extractor.domain.types import PageFormat
+from web_extractor.extractors.published_date import find_published_date
 
 _JS_REQUIRED_MARKERS = (
     "enable javascript",
@@ -87,9 +88,12 @@ class TrafilaturaExtractor:
             document = None
         if document is None:
             return PageMetadata()
+        published = find_published_date(html.decode("utf-8", errors="replace"))
         return PageMetadata(
             title=document.title,
             author=document.author,
+            published_at=published.value if published is not None else None,
+            published_source=published.source if published is not None else None,
             language=document.language,
             publisher=document.sitename,
         )

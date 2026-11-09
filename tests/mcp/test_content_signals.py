@@ -227,3 +227,31 @@ async def test_check_urls_rows_carry_the_document_kind(mcp: McpHarness) -> None:
     assert "document=html" in _text_of(result)
     assert result.structured_content is not None
     assert result.structured_content["url_rows"][0]["document"] == "html"
+
+
+@pytest.mark.asyncio
+async def test_structured_publication_date_is_shown_with_its_source(mcp: McpHarness) -> None:
+    metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="json_ld")
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
+
+    page = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
+    assert page.structured_content is not None
+    more = await _call(mcp, "read_more", {"cursor": page.structured_content["cursor"]})
+
+    assert "published: 2026-03-01 (json_ld)" in _text_of(page)
+    assert page.structured_content["published_source"] == "json_ld"
+    assert more.structured_content is not None
+    assert more.structured_content["published_at"] == "2026-03-01"
+
+
+@pytest.mark.asyncio
+async def test_no_date_line_without_a_structured_date(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    page = await _call(mcp, "fetch_page", {"url": _URL})
+
+    assert "published:" not in _text_of(page)
+    assert page.structured_content is not None
+    assert page.structured_content["published_at"] is None

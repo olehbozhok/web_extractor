@@ -192,6 +192,8 @@ class ToolMeta(BaseModel):
     cursor: str | None = None
     title: str | None = None
     author: str | None = None
+    published_at: str | None = None
+    published_source: str | None = None
     document: DocumentKind | None = None
     content_type: str | None = None
     content_quality: ContentQuality | None = None
@@ -320,6 +322,10 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
     lines.append(url_line)
     if outcome.metadata.title is not None:
         lines.append(f"title: {outcome.metadata.title}")
+    if outcome.metadata.published_at is not None:
+        lines.append(
+            f"published: {outcome.metadata.published_at} ({outcome.metadata.published_source})"
+        )
     if outcome.document is not None:
         lines.append(f"document: {outcome.document}")
     lines.append(_source_line(outcome, now))
@@ -346,7 +352,9 @@ def _register_fetch_page(server: MCPServer[object], deps: McpToolDeps) -> None:
         description=(
             "Fetch a web page and return its main text as clean markdown "
             "(navigation, ads and boilerplate removed), with title and author "
-            "when found. Use it to read a specific page you "
+            "when found, and the publication date only when the page states it in "
+            "structured markup (JSON-LD, meta tags); otherwise no date is given. "
+            "Use it to read a specific page you "
             "already have the URL for. Do not use it to search the web. To check "
             "whether a quote or fact appears on a page, prefer find_in_page: it "
             "is much cheaper. To check many URLs at once, use check_urls.\n\n"
@@ -558,6 +566,8 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         cursor=cursor_id,
         title=outcome.metadata.title,
         author=outcome.metadata.author,
+        published_at=outcome.metadata.published_at,
+        published_source=outcome.metadata.published_source,
         document=outcome.document,
         content_type=outcome.content_type if args.detail == "detailed" else None,
         content_quality=quality,
@@ -608,6 +618,8 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 cursor=read.next_cursor_id,
                 title=read.metadata.title,
                 author=read.metadata.author,
+                published_at=read.metadata.published_at,
+                published_source=read.metadata.published_source,
                 document=read.document,
                 content_quality=read.content_quality,
             )
