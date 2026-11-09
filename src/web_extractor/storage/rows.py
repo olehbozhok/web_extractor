@@ -10,7 +10,7 @@ that is an infrastructure failure, not an expected domain outcome.
 import sqlite3
 from collections.abc import Mapping
 
-from web_extractor.domain.types import ErrorKind, FetcherName, Status, ToolName
+from web_extractor.domain.types import ErrorKind, FetcherName, PageFormat, Status, ToolName
 
 
 class DataCorruptionError(RuntimeError):
@@ -94,6 +94,8 @@ _STATUS_TABLE: dict[str, Status] = {
 
 _FETCHER_TABLE: dict[str, FetcherName] = {"http": "http", "browser": "browser"}
 
+_PAGE_FORMAT_TABLE: dict[str, PageFormat] = {"markdown": "markdown", "text": "text"}
+
 _TOOL_TABLE: dict[str, ToolName] = {
     "fetch_page": "fetch_page",
     "read_more": "read_more",
@@ -115,6 +117,7 @@ _ERROR_KIND_TABLE: dict[str, ErrorKind] = {
     "internal": "internal",
     "server_error": "server_error",
     "redirect_error": "redirect_error",
+    "content_changed": "content_changed",
 }
 
 
@@ -152,3 +155,10 @@ def as_opt_error_kind(value: object, column: str) -> ErrorKind | None:
     if value is None:
         return None
     return _narrow(value, column, _ERROR_KIND_TABLE, "a known error kind")
+
+
+def as_opt_page_format(value: object, column: str) -> PageFormat | None:
+    """A nullable column holding one of the known page formats."""
+    if value is None:
+        return None
+    return _narrow(value, column, _PAGE_FORMAT_TABLE, "a known page format")

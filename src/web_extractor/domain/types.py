@@ -29,8 +29,12 @@ type ErrorKind = Literal[
     "internal",
     "server_error",
     "redirect_error",
+    "content_changed",
 ]
-"""Machine-readable kind of an expected failure (docs/03_mcp_interface.md, 5)."""
+"""Machine-readable kind of an expected failure (docs/03_mcp_interface.md, 5);
+``content_changed`` is journal-only (docs/01_requirements.md, 4.4): it marks
+a cache entry whose body changed on re-fetch and never surfaces as a tool
+error."""
 
 type RenderMode = Literal["auto", "static", "browser"]
 """How the pipeline may obtain the page: static fetch, browser render, or auto."""

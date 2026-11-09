@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from web_extractor.domain.types import (
     ErrorKind,
     FetcherName,
+    PageFormat,
     Status,
     ToolName,
 )
@@ -33,6 +34,8 @@ class PageRecord:
     content_sha256: str | None
     html: bytes | None
     text: str | None
+    text_format: PageFormat | None
+    """Which PageFormat ``text`` was extracted in; None for error entries."""
     metadata_json: str
     error_kind: ErrorKind | None
     error_message: str | None
