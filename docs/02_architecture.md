@@ -18,15 +18,21 @@
    │   Fetcher       Extractor        storage (SQLite WAL)    │
    │   (протокол)    (протокол)       cache_pages, events     │
    └───────┬───────────────────────────────────────────────────┘
-           │ HTTP (внутрішня мережа compose)
+           │ REST (внутрішня мережа compose)
            ▼
-   ┌── browser (контейнер 2, етап 3) ──┐
-   │ Playwright, пул контекстів        │
-   │ POST /render → html, headers, ... │
-   └───────────────────────────────────┘
+   ┌── browser (етап 3) ────────────────┐
+   │ Crawl4AI, пул браузерів            │
+   │ POST /crawl → html, status, ...    │
+   └───────────────┬────────────────────┘
+                   │ увесь вихідний трафік браузера
+                   ▼
+   ┌── egress-proxy ────────────────────┐
+   │ ACL: відмова для приватних,        │
+   │ loopback, link-local адрес         │──► інтернет
+   └────────────────────────────────────┘
 ```
 
-Два контейнери, а не три: Trafilatura — чиста функція над HTML без стану, тому живе модулем у ядрі. Браузер винесений, бо він важкий, нестабільний і потребує окремого sandbox. Екстрактор працює з HTML незалежно від того, який фетчер його отримав. Інтерфейс `Extractor` дозволяє замінити реалізацію або пізніше винести її в контейнер без змін конвеєра.
+Сервіси: ядро (власний код), браузер (готовий образ Crawl4AI) і egress-проксі. Trafilatura — чиста функція над HTML без стану, тому живе модулем у ядрі. Браузер винесений, бо він важкий, нестабільний і потребує окремого sandbox; власний Playwright-сервіс не пишемо, бо Crawl4AI закриває цю роль (`docs/spikes/01_crawl4ai.md`). Екстрактор працює з HTML незалежно від того, який фетчер його отримав. Інтерфейс `Extractor` дозволяє замінити реалізацію або пізніше винести її в контейнер без змін конвеєра.
 
 ## 2. Шари й напрямок залежностей
 
@@ -119,14 +125,42 @@ CREATE INDEX events_status_ts ON events(status, ts);
 
 ## 7. Контракт браузерного конектора (етап 3)
 
-```
-POST /render
-{ "url": str, "wait_until": "load"|"domcontentloaded"|"networkidle",
-  "wait_for_selector": str | null, "timeout_ms": int }
+Конектор — це REST Crawl4AI, а не наш власний API. Ядро викликає `POST /crawl` з токеном у `Authorization: Bearer ...`:
 
-200 { "status": "ok", "final_url": str, "http_status": int, "html": str,
-      "headers": {str: str}, "redirect_chain": [str], "page_id": str, "timings": {...} }
-4xx/5xx { "error": { "kind": str, "message": str } }
+```
+POST /crawl
+{ "urls": [url], "browser_config": {...}, "crawler_config": { "cache_mode": "bypass", ... } }
 ```
 
-Контейнер нічого не кешує, не знає про агентів і не пише в БД. Усі підзапити сторінки проходять ту саму перевірку SSRF.
+Кеш Crawl4AI вимкнений (`cache_mode: "bypass"`): єдиний кеш — наш, щоб був один набір правил TTL і `fresh`.
+
+Поля відповіді `results[0]`, що використовуються (перевірено в `docs/spikes/01_crawl4ai.md`):
+
+| Поле Crawl4AI | У що відображається |
+|---|---|
+| `html` | сирий HTML для кешу й `content_sha256` |
+| `redirected_url` | `final_url` |
+| `redirected_status_code` | `http_status` (не `status_code`, воно містить код першої відповіді) |
+| `response_headers` | заголовки відповіді |
+| `success`, `error_message`, `crawl_stats.proxies_used[].blocked` | вибір між `ok`, `blocked`, `error` |
+| `metadata` | початкові метадані (заголовок, опис); автор і дату бере наш екстрактор |
+
+`BrowserFetcher` — адаптер: він парсить відповідь у типи `domain` (розділ 3) і повертає `FetchResult`. Структура відповіді Crawl4AI не виходить за межі цього модуля. Контейнер нічого не знає про агентів і не пише в нашу БД.
+
+### 7.1. Мережева топологія compose
+
+```
+ networks:
+   core_net      # ядро <-> browser (REST); порт ядра публікується лише на 127.0.0.1
+   browser_net   # internal: true; browser <-> egress-proxy
+   egress_net    # egress-proxy <-> зовнішня мережа
+```
+
+- `core`: `core_net`.
+- `browser`: `core_net` і `browser_net`. Прямого виходу назовні немає: мережа `browser_net` має `internal: true`. Браузер налаштований на роботу через `egress-proxy` (проксі в `browser_config`).
+- `egress-proxy`: `browser_net` і `egress_net`. Єдиний сервіс із виходом в інтернет; відмовляє в з'єднанні з приватними, loopback, link-local та зарезервованими адресами за резолвленим IP.
+- Томи: БД ядра; кеш браузера не персистентний.
+- Для кожного сервісу: `healthcheck`, `restart: unless-stopped`, ліміти пам'яті для `browser` (`shm_size`, `mem_limit`).
+- `core` залежить від `browser` без `depends_on: condition: service_healthy` жорстко: падіння браузера не повинно блокувати старт ядра. Готовність браузера відображається в `/readyz` як окремий пункт.
+
+Чи така топологія справді блокує редіректи й підзапити у заборонені адреси, перевіряється спайком 02 (`docs/spikes/02_egress_isolation.md`).
