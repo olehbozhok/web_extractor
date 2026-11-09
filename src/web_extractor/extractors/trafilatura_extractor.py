@@ -24,12 +24,20 @@ _JS_REQUIRED_MARKERS = (
     "requires javascript",
     "please turn on javascript",
     "enable-javascript",
+    "javascript is not available",
+    "javascript is disabled",
 )
 """Lowercase markers of JS-only pages; detection is heuristic by design."""
 
-_JS_STUB_TEXT_LIMIT = 1000
-"""Short extractions over a page that also carries JS-required markers are
-treated as JS-only stubs (trafilatura returns the noscript boilerplate)."""
+_JS_STUB_TEXT_LIMIT = 200
+"""Extractions this short over a page whose *raw HTML* carries JS-required
+markers are JS-only stubs (trafilatura returned the noscript boilerplate). Kept
+low on purpose: ordinary pages often carry such markers in ``<noscript>`` (e.g.
+a comments widget), and a real short article must not become ``needs_js``."""
+
+_JS_TEXT_MARKER_LIMIT = 1000
+"""Extractions up to this length whose *extracted text itself* says JavaScript is
+required are JS-only shells (e.g. "JavaScript is not available" pages)."""
 
 _OUTPUT_FORMATS: dict[PageFormat, str] = {
     "markdown": "markdown",
@@ -64,7 +72,9 @@ class TrafilaturaExtractor:
                 return ExtractionFailure("needs_js", msg)
             msg = f"no main text found on page {final_url}"
             return ExtractionFailure("empty", msg)
-        if len(text) <= _JS_STUB_TEXT_LIMIT and _looks_like_js_page(html):
+        if (len(text) <= _JS_STUB_TEXT_LIMIT and _looks_like_js_page(html)) or (
+            len(text) <= _JS_TEXT_MARKER_LIMIT and _has_js_marker(text)
+        ):
             msg = f"page {final_url} renders only with JavaScript (stub text extracted)"
             return ExtractionFailure("needs_js", msg)
         return Extracted(text=text, format=page_format, metadata=self._metadata(html, final_url))
@@ -91,5 +101,10 @@ def _looks_like_js_page(html: bytes) -> bool:
     Case-insensitive scan of the raw bytes decoded leniently; a heuristic
     that errs toward ``empty`` when unsure.
     """
-    lowered = html.decode("utf-8", errors="replace").lower()
+    return _has_js_marker(html.decode("utf-8", errors="replace"))
+
+
+def _has_js_marker(text: str) -> bool:
+    """True when ``text`` contains a JS-required marker (case-insensitive)."""
+    lowered = text.lower()
     return any(marker in lowered for marker in _JS_REQUIRED_MARKERS)

@@ -66,7 +66,10 @@ def parse_metadata_json(raw: str) -> PageMetadata:
     Keys that no longer exist (the publication date, removed because extractors
     guess it unreliably) are ignored, so old cache entries stay readable.
     """
-    data: object = json.loads(raw)
+    try:
+        data: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return PageMetadata()
     if not isinstance(data, dict):
         return PageMetadata()
     return PageMetadata(

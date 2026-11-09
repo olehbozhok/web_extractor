@@ -81,3 +81,39 @@ async def test_undecodable_bytes_report_parse_error() -> None:
     )
     assert isinstance(result, ExtractionFailure)
     assert result.kind in ("parse_error", "empty")
+
+
+_SHORT_ARTICLE = (
+    "<p>" + "The city council approved the new budget on Tuesday after a long debate. " * 7 + "</p>"
+)
+
+
+@pytest.mark.asyncio
+async def test_short_article_with_noscript_comment_widget_is_not_needs_js() -> None:
+    """Regression: a JS marker in <noscript> must not hide a real short article."""
+    html = (
+        "<html><head><title>Council approves budget</title></head><body><article>"
+        f"<h1>Council approves budget</h1>{_SHORT_ARTICLE}</article>"
+        "<noscript>Please enable JavaScript to view the comments.</noscript>"
+        "</body></html>"
+    ).encode()
+
+    result = await TrafilaturaExtractor().extract(html, "https://news.test/a", "text")
+
+    assert isinstance(result, Extracted)
+    assert "budget" in result.text
+
+
+@pytest.mark.asyncio
+async def test_extracted_text_that_demands_javascript_is_needs_js() -> None:
+    shell = (
+        "JavaScript is not available. We have detected that JavaScript is disabled "
+        "in this browser. Please enable JavaScript or switch to a supported browser "
+        "to continue using this site. "
+    ) * 3
+    html = f"<html><body><article><p>{shell}</p></article></body></html>".encode()
+
+    result = await TrafilaturaExtractor().extract(html, "https://x.test/post", "text")
+
+    assert isinstance(result, ExtractionFailure)
+    assert result.kind == "needs_js"

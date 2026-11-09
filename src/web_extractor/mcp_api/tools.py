@@ -510,6 +510,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         )
 
     text = outcome.text or ""
+    shown_format = outcome.text_format or args.page_format
     total = len(text)
     shown = text[: args.max_chars]
     truncated = total > args.max_chars
@@ -517,7 +518,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         await deps.cursors.issue(
             outcome.url,
             text,
-            args.page_format,
+            shown_format,
             offset=args.max_chars,
             max_chars=args.max_chars,
         )
@@ -527,7 +528,6 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
     lines = _header_lines(outcome, args.detail, deps.clock.now())
     quality = assess_content(text)
     lines.append(f"content: {quality}")
-    shown_format = outcome.text_format or args.page_format
     lines.append(f"text_version: {text_version_short(text)} ({shown_format})")
     lines.append(chunk_line(0, min(total, args.max_chars), total))
     if cursor_id is not None:
@@ -696,7 +696,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
             cursor_id = await deps.cursors.issue(
                 outcome.url,
                 text,
-                args.page_format,
+                searched_format,
                 offset=match.offset,
                 max_chars=deps.default_max_chars,
             )

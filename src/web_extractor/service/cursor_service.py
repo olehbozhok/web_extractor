@@ -36,7 +36,7 @@ class CursorText:
     next_cursor_id: str | None
     """Issued only when ``has_more``; points at the end of this slice."""
     metadata: PageMetadata
-    """The page's metadata, so a continuation does not lose title, author, date."""
+    """The page's metadata, so a continuation does not lose title and author."""
     content_quality: ContentQuality
     """The verdict on the whole text, not on the slice."""
 
