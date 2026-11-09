@@ -10,8 +10,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
+from fastapi.staticfiles import StaticFiles
 from mcp.server.mcpserver import MCPServer
 
 from web_extractor.config import Settings
@@ -31,8 +33,11 @@ from web_extractor.storage.cache_repository import CacheRepository
 from web_extractor.storage.cursor_repository import CursorRepository
 from web_extractor.storage.database import Database
 from web_extractor.storage.event_repository import EventRepository
+from web_extractor.web.routes import register_web_routes
 
 logger = logging.getLogger("web_extractor.app")
+
+_STATIC_DIR = Path(__file__).parent.parent / "web" / "static"
 
 
 @asynccontextmanager
@@ -152,6 +157,11 @@ def create_app(
         stateless_http=True, json_response=True, host=settings.host
     )
     app.state.mcp_server = server
+
+    web_router = APIRouter()
+    register_web_routes(web_router, database, service_clock)
+    app.include_router(web_router)
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

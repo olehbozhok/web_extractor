@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="periods">
+  Period:
+  {% for p in ["24h", "7d", "30d"] %}
+    <a href="/?period={{ p }}" class="{{ 'active' if p == period else '' }}">{{ p }}</a>
+  {% endfor %}
+</p>
+
+{% if view.total_events == 0 %}
+<p class="muted">No requests recorded in this period.</p>
+{% endif %}
+
+<div class="cards">
+  <div class="card"><div class="value">{{ view.total_events }}</div><div class="label">Requests</div></div>
+  <div class="card"><div class="value">{{ view.hit_rate_pct }}%</div><div class="label">Cache hit rate</div></div>
+  <div class="card"><div class="value">{{ view.needs_browser_share_pct }}%</div><div class="label">Needs browser</div></div>
+  <div class="card"><div class="value">{{ view.unknown_agent_share_pct }}%</div><div class="label">Unknown agents</div></div>
+  <div class="card"><div class="value">{{ view.duration_p50_ms if view.duration_p50_ms is not none else "–" }}</div><div class="label">Duration p50, ms</div></div>
+  <div class="card"><div class="value">{{ view.duration_p95_ms if view.duration_p95_ms is not none else "–" }}</div><div class="label">Duration p95, ms</div></div>
+</div>
+
+<h2>By status</h2>
+<table>
+  <tr><th>status</th><th class="num">count</th></tr>
+  {% for status, count in view.by_status.items() %}
+  <tr><td>{{ status }}</td><td class="num">{{ count }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>By HTTP status</h2>
+<table>
+  <tr><th>http status</th><th class="num">count</th></tr>
+  {% for code, count in view.by_http_status.items() %}
+  <tr><td>{{ code }}</td><td class="num">{{ count }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Top agents</h2>
+<table>
+  <tr><th>agent</th><th class="num">requests</th></tr>
+  {% for item in view.top_agents %}
+  <tr><td>{{ item.name }}</td><td class="num">{{ item.count }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Top domains</h2>
+<table>
+  <tr><th>domain</th><th class="num">requests</th></tr>
+  {% for item in view.top_domains %}
+  <tr><td>{{ item.name }}</td><td class="num">{{ item.count }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Top URLs by repeats</h2>
+<table>
+  <tr><th>url</th><th class="num">requests</th></tr>
+  {% for item in view.top_urls %}
+  <tr><td><code>{{ item.name }}</code></td><td class="num">{{ item.count }}</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
