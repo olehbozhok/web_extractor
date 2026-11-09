@@ -9,6 +9,9 @@ from web_extractor.storage.database import Database
 
 _TABLES_EXPECTED = {"cache_pages", "cursors", "events", "schema_version"}
 
+_LATEST_VERSION = 2
+"""The newest bundled migration; bump when adding 003_...sql."""
+
 
 @pytest_asyncio.fixture
 async def db_path(tmp_path: Path) -> str:
@@ -36,7 +39,7 @@ async def _current_version(db: Database) -> int:
 async def test_fresh_database_gets_all_tables(db_path: str) -> None:
     async with Database(db_path) as db:
         assert await _table_names(db) >= _TABLES_EXPECTED
-        assert await _current_version(db) == 1
+        assert await _current_version(db) == _LATEST_VERSION
 
 
 @pytest.mark.asyncio
@@ -45,7 +48,7 @@ async def test_reopening_is_idempotent(db_path: str) -> None:
         first_tables = await _table_names(db)
     async with Database(db_path) as db:
         assert await _table_names(db) == first_tables
-        assert await _current_version(db) == 1
+        assert await _current_version(db) == _LATEST_VERSION
 
 
 @pytest.mark.asyncio

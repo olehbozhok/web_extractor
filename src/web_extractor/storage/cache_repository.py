@@ -10,6 +10,7 @@ from web_extractor.storage.rows import (
     as_opt_bytes,
     as_opt_error_kind,
     as_opt_int,
+    as_opt_page_format,
     as_opt_str,
     as_status,
     as_str,
@@ -18,8 +19,8 @@ from web_extractor.storage.rows import (
 
 _GET_QUERY = (
     "SELECT url_key, final_url, status, http_status, fetcher, fetched_at, "
-    "expires_at, content_sha256, html, text, metadata_json, error_kind, "
-    "error_message FROM cache_pages WHERE url_key = ?"
+    "expires_at, content_sha256, html, text, text_format, metadata_json, "
+    "error_kind, error_message FROM cache_pages WHERE url_key = ?"
 )
 """Column list is a fixed constant, never built from input (S608)."""
 
@@ -43,9 +44,9 @@ class CacheRepository:
         query = """
             INSERT INTO cache_pages (
                 url_key, final_url, status, http_status, fetcher, fetched_at,
-                expires_at, content_sha256, html, text, metadata_json,
-                error_kind, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                expires_at, content_sha256, html, text, text_format,
+                metadata_json, error_kind, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url_key) DO UPDATE SET
                 final_url = excluded.final_url,
                 status = excluded.status,
@@ -56,6 +57,7 @@ class CacheRepository:
                 content_sha256 = excluded.content_sha256,
                 html = excluded.html,
                 text = excluded.text,
+                text_format = excluded.text_format,
                 metadata_json = excluded.metadata_json,
                 error_kind = excluded.error_kind,
                 error_message = excluded.error_message
@@ -73,6 +75,7 @@ class CacheRepository:
                 record.content_sha256,
                 record.html,
                 record.text,
+                record.text_format,
                 record.metadata_json,
                 record.error_kind,
                 record.error_message,
@@ -102,6 +105,7 @@ def _record_from_row(row: sqlite3.Row) -> PageRecord:
         content_sha256=as_opt_str(row_value(row, "content_sha256"), "content_sha256"),
         html=as_opt_bytes(row_value(row, "html"), "html"),
         text=as_opt_str(row_value(row, "text"), "text"),
+        text_format=as_opt_page_format(row_value(row, "text_format"), "text_format"),
         metadata_json=as_str(row_value(row, "metadata_json"), "metadata_json"),
         error_kind=_opt_error_kind(row),
         error_message=as_opt_str(row_value(row, "error_message"), "error_message"),

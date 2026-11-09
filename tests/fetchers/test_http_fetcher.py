@@ -4,7 +4,8 @@ import time
 from ipaddress import IPv4Address, IPv6Address
 
 import pytest
-from fetch_helpers import (
+
+from tests.fetchers.fetch_helpers import (
     FIXED_NOW,
     FailingResolver,
     FixedClock,
@@ -12,7 +13,6 @@ from fetch_helpers import (
     ScriptedResponse,
     StaticResolver,
 )
-
 from web_extractor.domain.fetch import Fetched, FetchFailure, FetchRequest
 from web_extractor.domain.ssrf import SsrfViolation, check_address
 from web_extractor.domain.types import AgentId
