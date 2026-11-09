@@ -20,6 +20,7 @@ from urllib.parse import urljoin
 import httpcore
 import httpx
 
+from web_extractor.domain.content_type import is_supported_content_type, media_type
 from web_extractor.domain.fetch import Fetched, FetchFailure, FetchRequest, FetchResult
 from web_extractor.domain.ssrf import SsrfViolation, check_address
 from web_extractor.domain.types import (
@@ -159,7 +160,7 @@ class HttpFetcher:
             transport=PinnedTransport(backend),
             headers={
                 "User-Agent": self._config.user_agent,
-                "Accept": "text/html,application/xhtml+xml",
+                "Accept": "text/html,application/xhtml+xml,application/pdf;q=0.9",
             },
             timeout=httpx.Timeout(
                 connect=self._config.connect_timeout_s,
@@ -244,7 +245,7 @@ class HttpFetcher:
             addresses = await self._resolver.resolve(url.host)
         except OSError as exc:
             msg = f"DNS resolution failed for {url.host!r}: {exc}"
-            return FetchFailure("network", msg, final_url=url)
+            return FetchFailure("dns", msg, final_url=url)
         for address in addresses:
             violation = self._check(address)
             if violation is not None:
@@ -253,18 +254,10 @@ class HttpFetcher:
         backend.pin(url.host, addresses[0])
         return None
 
-    async def _to_result(
-        self,
-        response: httpx.Response,
-        url: NormalizedUrl,
-        chain: tuple[NormalizedUrl, ...],
-    ) -> FetchResult:
-        """Map a completed response onto Fetched or a FetchFailure value.
-
-        Runs inside the ``client.stream`` context: the body must be read
-        before the context closes.
-        """
-        status = HttpStatus(response.status_code)
+    def _status_failure(
+        self, response: httpx.Response, url: NormalizedUrl, status: HttpStatus
+    ) -> FetchFailure | None:
+        """Map a non-success HTTP status onto a failure value, or None for 2xx."""
         if status.value in HTTP_BLOCKED_STATUSES:
             retry_after = (
                 _parse_retry_after(response.headers.get("retry-after"), self._clock.now())
@@ -285,6 +278,28 @@ class HttpFetcher:
         if status.value < HTTP_OK_MIN or status.value > HTTP_OK_MAX:
             msg = f"{url} returned {status.value}"
             return FetchFailure("server_error", msg, http_status=status, final_url=url)
+        return None
+
+    async def _to_result(
+        self,
+        response: httpx.Response,
+        url: NormalizedUrl,
+        chain: tuple[NormalizedUrl, ...],
+    ) -> FetchResult:
+        """Map a completed response onto Fetched or a FetchFailure value.
+
+        Runs inside the ``client.stream`` context: the body must be read
+        before the context closes.
+        """
+        status = HttpStatus(response.status_code)
+        status_failure = self._status_failure(response, url, status)
+        if status_failure is not None:
+            return status_failure
+
+        content_type = response.headers.get("content-type")
+        if not is_supported_content_type(content_type):
+            msg = f"{url} returned unsupported content type {media_type(content_type)!r}"
+            return FetchFailure("unsupported_type", msg, http_status=status, final_url=url)
 
         declared = response.headers.get("content-length")
         if (

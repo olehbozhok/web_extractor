@@ -255,11 +255,11 @@ def _failing_fetcher() -> HttpFetcher:
 
 
 @pytest.mark.asyncio
-async def test_dns_failure_is_network_failure() -> None:
+async def test_dns_failure_is_dns_failure() -> None:
     fetcher = _failing_fetcher()
     result = await fetcher.fetch(_request(f"http://{_HOST}/"))
     assert isinstance(result, FetchFailure)
-    assert result.kind == "network"
+    assert result.kind == "dns"
 
 
 @pytest.mark.asyncio
@@ -273,3 +273,29 @@ async def test_ipv6_pinned_connection_works() -> None:
         result = await fetcher.fetch(_request(server.url_for(_HOST, "/v6")))
     assert isinstance(result, Fetched)
     assert result.body == _OK_BODY
+
+
+@pytest.mark.asyncio
+async def test_unsupported_content_type_is_rejected_before_reading_the_body() -> None:
+    with LoopbackHttpServer(
+        lambda _path, _headers: ScriptedResponse(200, {"Content-Type": "application/zip"}, b"PK")
+    ) as server:
+        resolver = StaticResolver({_HOST: [IPv4Address("127.0.0.1")]})
+        fetcher = _fetcher(server.port, resolver)
+        result = await fetcher.fetch(_request(server.url_for(_HOST, "/archive.zip")))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "unsupported_type"
+    assert result.http_status is not None and result.http_status.value == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", ["application/pdf", "application/octet-stream"])
+async def test_pdf_and_generic_types_pass_through(content_type: str) -> None:
+    with LoopbackHttpServer(
+        lambda _path, _headers: ScriptedResponse(200, {"Content-Type": content_type}, b"%PDF-1.7")
+    ) as server:
+        resolver = StaticResolver({_HOST: [IPv4Address("127.0.0.1")]})
+        fetcher = _fetcher(server.port, resolver)
+        result = await fetcher.fetch(_request(server.url_for(_HOST, "/doc")))
+    assert isinstance(result, Fetched)
+    assert result.body == b"%PDF-1.7"

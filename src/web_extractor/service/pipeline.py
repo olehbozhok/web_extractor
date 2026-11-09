@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 
 from web_extractor.domain.extract import (
+    DateSource,
     Extracted,
     ExtractionFailure,
     ExtractionFailureKind,
@@ -33,7 +34,7 @@ from web_extractor.domain.fetch import (
 )
 from web_extractor.domain.records import Event, PageRecord
 from web_extractor.domain.ttl import compute_expires_at, is_expired, parse_iso_utc, to_iso_utc
-from web_extractor.domain.types import Clock, ErrorKind, PageFormat, Status
+from web_extractor.domain.types import Clock, ErrorKind, PageFormat, RenderMode, Status
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
 from web_extractor.extractors.base import Extractor
 from web_extractor.fetchers.base import Fetcher
@@ -153,8 +154,10 @@ class FetchService:
 
         if not request.fresh:
             cached = await self._cache.get(url.value)
-            if cached is not None and not is_expired(
-                parse_iso_utc(cached.expires_at), self._clock.now()
+            if (
+                cached is not None
+                and not is_expired(parse_iso_utc(cached.expires_at), self._clock.now())
+                and _serves_render(cached, request.render)
             ):
                 outcome = await self._outcome_from_record(cached, request.page_format)
                 size = len(cached.html) if cached.html is not None else None
@@ -167,7 +170,7 @@ class FetchService:
                 return outcome
 
         flight_result, started_by_self = await self._flights.run(
-            flight_key(url.value, fresh=request.fresh),
+            flight_key(url.value, fresh=request.fresh, browser=request.render == "browser"),
             lambda: self._fetch_extract_store(url, request),
         )
         metrics = (
@@ -457,6 +460,12 @@ class FetchService:
         await self._events.append(event)
 
 
+def _serves_render(cached: PageRecord, render: RenderMode) -> bool:
+    """A cached entry serves a request unless it asks for a browser render and the
+    entry came from a static fetch (a browser entry serves every mode)."""
+    return render != "browser" or cached.fetcher == "browser"
+
+
 def _status_for_failure(kind: FetchFailureKind) -> Status:
     """Map a fetch failure kind onto the response status."""
     match kind:
@@ -480,7 +489,9 @@ _FAILURE_ERROR_KINDS: dict[FetchFailureKind, ErrorKind] = {
     "ssrf_blocked": "ssrf_blocked",
     "server_error": "server_error",
     "redirect_error": "redirect_error",
-    "network": "internal",
+    "network": "network",
+    "dns": "dns",
+    "unsupported_type": "unsupported_type",
     "browser_unavailable": "browser_unavailable",
     "needs_browser": "needs_browser",
 }
@@ -518,9 +529,20 @@ def _parse_metadata(raw: str) -> PageMetadata:
         title=_opt_str(data, "title"),
         author=_opt_str(data, "author"),
         published_at=_opt_str(data, "published_at"),
+        published_source=_date_source(data),
         language=_opt_str(data, "language"),
         publisher=_opt_str(data, "publisher"),
     )
+
+
+def _date_source(data: dict[str, object]) -> DateSource | None:
+    """The stored date provenance; unknown values degrade to None."""
+    value = data.get("published_source")
+    match value:
+        case "json_ld" | "meta" | "url" | "text":
+            return value
+        case _:
+            return None
 
 
 def _opt_str(data: dict[str, object], key: str) -> str | None:

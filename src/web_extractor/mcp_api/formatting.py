@@ -22,6 +22,11 @@ _ADVICE: dict[ErrorKind, str] = {
     "timeout": "Retry once; if the page was browser-rendered, try render=static.",
     "needs_browser": "Repeat with render=browser if available.",
     "too_large": "The page is too large for text extraction; use another source.",
+    "dns": "The host name does not resolve; check the spelling of the domain.",
+    "network": "Connection failed; retry once, then try another source.",
+    "unsupported_type": (
+        "The content type (image, archive, media) cannot be turned into text; use another source."
+    ),
     "browser_unavailable": "Retry later, or use render=static.",
     "unknown_cursor": "Repeat fetch_page with the same URL.",
     "stale_cursor": "The page changed; repeat fetch_page with the same URL.",

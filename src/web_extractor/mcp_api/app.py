@@ -19,6 +19,8 @@ from mcp.server.mcpserver import MCPServer
 from web_extractor.config import Settings
 from web_extractor.domain.types import Clock
 from web_extractor.extractors.base import Extractor
+from web_extractor.extractors.dispatch import ContentExtractor
+from web_extractor.extractors.pdf_extractor import PdfExtractor
 from web_extractor.extractors.trafilatura_extractor import TrafilaturaExtractor
 from web_extractor.fetchers.base import Fetcher
 from web_extractor.fetchers.browser_fetcher import (
@@ -127,7 +129,7 @@ def create_app(
         clock=service_clock,
         resolver=SystemResolver(),
     )
-    real_extractor = extractor or TrafilaturaExtractor()
+    real_extractor = extractor or ContentExtractor(html=TrafilaturaExtractor(), pdf=PdfExtractor())
     service = FetchService(
         FetchServiceDeps(
             fetcher=real_fetcher,
