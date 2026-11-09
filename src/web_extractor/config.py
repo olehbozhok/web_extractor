@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     limit_overrides: dict[str, DomainLimitOverride] = Field(default_factory=dict)
     """Hostname -> limits; JSON in the env var."""
 
+    browser_base_url: str = ""
+    """Crawl4AI base URL on core_net; empty disables browser rendering."""
+    browser_token: str = ""
+    """Bearer token from the environment; empty disables browser rendering."""
+    browser_page_timeout_ms: int = Field(default=30000, ge=1000, le=120000)
+    browser_max_concurrent: int = Field(default=3, ge=1, le=10)
+    """Must stay below Crawl4AI's pool.max_pages (docs/spikes/02, appendix)."""
+
     default_max_chars: int = Field(default=12000, ge=1, le=50000)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

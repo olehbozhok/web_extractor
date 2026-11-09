@@ -21,6 +21,11 @@ from web_extractor.domain.types import Clock
 from web_extractor.extractors.base import Extractor
 from web_extractor.extractors.trafilatura_extractor import TrafilaturaExtractor
 from web_extractor.fetchers.base import Fetcher
+from web_extractor.fetchers.browser_fetcher import (
+    BrowserFetcher,
+    BrowserFetcherConfig,
+    BrowserHealthProbe,
+)
 from web_extractor.fetchers.http_fetcher import HttpFetcher, HttpFetcherConfig, SystemResolver
 from web_extractor.mcp_api.tools import McpToolDeps, register_tools
 from web_extractor.service.clock import SystemClock
@@ -95,6 +100,20 @@ def create_app(
         },
         global_max_concurrent=settings.global_max_concurrent,
     )
+    browser_fetcher = (
+        BrowserFetcher(
+            config=BrowserFetcherConfig(
+                base_url=settings.browser_base_url,
+                token=settings.browser_token,
+                page_timeout_ms=settings.browser_page_timeout_ms,
+                max_concurrent=settings.browser_max_concurrent,
+            ),
+            clock=service_clock,
+            resolver=SystemResolver(),
+        )
+        if settings.browser_base_url and settings.browser_token
+        else None
+    )
     real_fetcher = fetcher or HttpFetcher(
         config=HttpFetcherConfig(
             user_agent=settings.user_agent,
@@ -112,6 +131,7 @@ def create_app(
     service = FetchService(
         FetchServiceDeps(
             fetcher=real_fetcher,
+            browser_fetcher=browser_fetcher,
             extractor=real_extractor,
             cache=cache_repository,
             events=EventRepository(database),
@@ -134,6 +154,18 @@ def create_app(
         cursor_ttl=timedelta(hours=settings.cursor_ttl_hours),
     )
     app.state.clock = service_clock
+    app.state.browser_health = (
+        BrowserHealthProbe(
+            BrowserFetcherConfig(
+                base_url=settings.browser_base_url,
+                token=settings.browser_token,
+                page_timeout_ms=settings.browser_page_timeout_ms,
+                max_concurrent=settings.browser_max_concurrent,
+            )
+        )
+        if browser_fetcher is not None
+        else None
+    )
 
     server: MCPServer[object] = MCPServer(
         name="web_extractor",
@@ -169,14 +201,31 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/readyz")
-    async def readyz() -> dict[str, bool]:
-        """Readiness: the database answers a trivial query."""
+    async def readyz() -> dict[str, object]:
+        """Readiness: database connectivity plus the browser connector state.
+
+        ``browser`` is absent when rendering is not configured; otherwise it
+        reports reachability and the Chromium instance count (a pool entry
+        is one instance; the probe cannot see a dead renderer - the
+        container healthcheck restarts that, docs/spikes/02).
+        """
+        report: dict[str, object] = {}
         try:
             await database.connection.execute("SELECT 1")
         except Exception:
             logger.exception("readyz database check failed")
-            return {"database": False}
-        return {"database": True}
+            report["database"] = False
+            return report
+        report["database"] = True
+        probe = app.state.browser_health
+        if probe is None:
+            return report
+        health = await probe.probe()
+        report["browser"] = {
+            "reachable": health.reachable,
+            "chromium_instances": health.chromium_instances,
+        }
+        return report
 
     # Mounted last, at the root: the MCP app itself serves /mcp, and the
     # health routes above take precedence for their paths.

@@ -1,4 +1,4 @@
-"""Fixtures for service-layer tests: a wired FetchService over a temp DB."""
+"""Fixtures for service-layer tests: wired FetchServices over a temp DB."""
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest_asyncio
 
 from tests.service.service_helpers import FakeClock, ScriptedExtractor, ScriptedFetcher
-from web_extractor.domain.types import AgentId, PageFormat, TaskId
+from web_extractor.domain.types import AgentId, PageFormat, RenderMode, TaskId
 from web_extractor.service.config import ServiceConfig
 from web_extractor.service.domain_limits import DomainLimiter, HostLimit
 from web_extractor.service.pipeline import FetchService, FetchServiceDeps
@@ -24,6 +24,7 @@ class ServiceHarness:
 
     service: FetchService
     fetcher: ScriptedFetcher
+    browser_fetcher: ScriptedFetcher  # wired into the service only when requested
     extractor: ScriptedExtractor
     clock: FakeClock
     database: Database
@@ -35,11 +36,12 @@ class ServiceHarness:
         return [dict(row) for row in rows]
 
 
-@pytest_asyncio.fixture
-async def harness(tmp_path: Path) -> AsyncIterator[ServiceHarness]:
+async def _build_harness(tmp_path: Path, *, with_browser: bool) -> ServiceHarness:
+    """Wire a FetchService with scripted doubles; caller owns the lifecycle."""
     database = Database(str(tmp_path / "service.db"))
     await database.connect()
     fetcher = ScriptedFetcher()
+    browser_fetcher = ScriptedFetcher()
     extractor = ScriptedExtractor()
     clock = FakeClock()
     limiter = DomainLimiter(
@@ -49,6 +51,7 @@ async def harness(tmp_path: Path) -> AsyncIterator[ServiceHarness]:
     service = FetchService(
         FetchServiceDeps(
             fetcher=fetcher,
+            browser_fetcher=browser_fetcher if with_browser else None,
             extractor=extractor,
             cache=CacheRepository(database),
             events=EventRepository(database),
@@ -58,16 +61,37 @@ async def harness(tmp_path: Path) -> AsyncIterator[ServiceHarness]:
             config=ServiceConfig(),
         )
     )
-    yield ServiceHarness(
-        service=service, fetcher=fetcher, extractor=extractor, clock=clock, database=database
+    return ServiceHarness(
+        service=service,
+        fetcher=fetcher,
+        browser_fetcher=browser_fetcher,
+        extractor=extractor,
+        clock=clock,
+        database=database,
     )
-    await database.close()
+
+
+@pytest_asyncio.fixture
+async def harness(tmp_path: Path) -> AsyncIterator[ServiceHarness]:
+    """A FetchService with the static fetcher only (browser not configured)."""
+    harness = await _build_harness(tmp_path, with_browser=False)
+    yield harness
+    await harness.database.close()
+
+
+@pytest_asyncio.fixture
+async def browser_harness(tmp_path: Path) -> AsyncIterator[ServiceHarness]:
+    """A FetchService with both fetchers wired (render=browser available)."""
+    harness = await _build_harness(tmp_path, with_browser=True)
+    yield harness
+    await harness.database.close()
 
 
 def service_request(
     raw_url: str,
     *,
     fresh: bool = False,
+    render: RenderMode = "static",
     page_format: PageFormat = "text",
     task: str | None = None,
     request_id: str = "req-1",
@@ -76,7 +100,7 @@ def service_request(
     return ServiceRequest(
         raw_url=raw_url,
         fresh=fresh,
-        render="static",
+        render=render,
         page_format=page_format,
         detail="concise",
         agent=AgentId("tester"),

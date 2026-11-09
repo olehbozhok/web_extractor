@@ -1,19 +1,55 @@
-# The whole stack for stage 1: the core service only. The browser service
-# (Crawl4AI) arrives in stage 3 (docs/04_plan.md, M11-M12).
+# The full stack: core (own code) + Crawl4AI browser service (stage 3).
 #
-# The port is published on 127.0.0.1 only: the service must never be
-# reachable from other machines (01_requirements.md, section 5).
+# Networks (docs/02, section 7.1):
+#   core_net   - internal; core <-> browser REST; no egress at all
+#   egress_net - regular; core's static fetcher and the browser reach the
+#                internet through it
+#   default    - regular; exists only so the core's port can be published
+#                (an internal network cannot publish ports); compose maps
+#                it to 127.0.0.1 on the host
+# The browser's port is never published; its isolation is its built-in
+# egress proxy plus the core's SSRF re-check (docs/spikes/02).
 services:
   core:
     build:
       context: .
       dockerfile: docker/core.Dockerfile
     image: web-extractor-core:0.1.0
+    environment:
+      WX_BROWSER_BASE_URL: "http://crawl4ai:11235"
+      WX_BROWSER_TOKEN: "${CRAWL4AI_API_TOKEN:?set CRAWL4AI_API_TOKEN in the environment or .env}"
     ports:
       - "127.0.0.1:8321:8321"
     volumes:
       - core-data:/data
+    networks: [default, core_net, egress_net]
     restart: unless-stopped
+    # The core must start even while the browser is down; readiness of the
+    # browser is reported by /readyz, not by blocking startup.
+
+  crawl4ai:
+    image: unclecode/crawl4ai:0.9.5
+    environment:
+      CRAWL4AI_API_TOKEN: "${CRAWL4AI_API_TOKEN:?set CRAWL4AI_API_TOKEN in the environment or .env}"
+    volumes:
+      - ./docker/browser/config.yml:/app/config.yml:ro
+      - ./docker/browser/hc.py:/hc/hc.py:ro
+    shm_size: 1g
+    mem_limit: 4g
+    networks: [core_net, egress_net]
+    restart: unless-stopped
+    healthcheck:
+      # A real browser crawl: /health stays ok with a dead Chromium.
+      test: ["CMD", "python", "/hc/hc.py"]
+      interval: 10s
+      timeout: 20s
+      retries: 1
+      start_period: 60s
 
 volumes:
   core-data:
+
+networks:
+  core_net:
+    internal: true
+  egress_net:

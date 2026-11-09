@@ -167,6 +167,20 @@ HTTP_STATUS_MIN = 100
 HTTP_STATUS_MAX = 599
 """Highest HTTP status code reported by servers."""
 
+HTTP_OK_MIN = 200
+HTTP_OK_MAX = 299
+
+HTTP_BLOCKED_STATUSES = (403, 429)
+"""Status codes treated as blocked (S5, docs/01 section 4)."""
+
+HTTP_NOT_FOUND_STATUSES = (404, 410)
+"""Status codes treated as not found."""
+
+HTTP_REDIRECT_CODES = (301, 302, 303, 307, 308)
+"""Codes whose Location header a client follows."""
+
+HTTP_TOO_MANY_REQUESTS = 429
+
 
 @dataclass(frozen=True, slots=True)
 class HttpStatus:
