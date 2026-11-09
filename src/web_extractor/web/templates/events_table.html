@@ -1,0 +1,31 @@
+<p class="muted">{{ total }} events{% if total > page_size %}; page {{ page }} of {{ ((total - 1) // page_size) + 1 }}{% endif %}</p>
+<table>
+  <tr>
+    {% for column in sortable %}
+    <th>
+      <a hx-get="/events?period={{ period }}&agent={{ filters.agent }}&domain={{ filters.domain }}&status={{ filters.status }}&cache_hit={{ filters.cache_hit }}&fetcher={{ filters.fetcher }}&sort={{ column }}&descending={{ 'false' if (sort == column and descending) else 'true' }}&page=1" hx-target="#events-table" href="/events?period={{ period }}&agent={{ filters.agent }}&domain={{ filters.domain }}&status={{ filters.status }}&cache_hit={{ filters.cache_hit }}&fetcher={{ filters.fetcher }}&sort={{ column }}&descending={{ 'false' if (sort == column and descending) else 'true' }}&page=1">
+        {{ column }}{{ ' ↓' if sort == column and descending else (' ↑' if sort == column else '') }}
+      </a>
+    </th>
+    {% endfor %}
+    <th>tool</th><th>url</th><th>error</th>
+  </tr>
+  {% for event in events %}
+  <tr>
+    <td>{{ event.ts }}</td>
+    <td>{{ event.agent }}</td>
+    <td>{{ event.status }}</td>
+    <td class="num">{{ event.http_status if event.http_status is not none else "–" }}</td>
+    <td class="num">{{ event.duration_ms }}</td>
+    <td>{{ event.tool }}</td>
+    <td><code>{{ event.url }}</code>{% if event.cache_hit %} <span class="muted">(cache)</span>{% endif %}</td>
+    <td>{{ event.error_kind if event.error_kind else "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if total > page_size %}
+<p>
+  {% if page > 1 %}<a href="/events?period={{ period }}&agent={{ filters.agent }}&domain={{ filters.domain }}&status={{ filters.status }}&cache_hit={{ filters.cache_hit }}&fetcher={{ filters.fetcher }}&sort={{ sort }}&descending={{ descending | lower }}&page={{ page - 1 }}">← prev</a>{% endif %}
+  {% if page * page_size < total %}<a href="/events?period={{ period }}&agent={{ filters.agent }}&domain={{ filters.domain }}&status={{ filters.status }}&cache_hit={{ filters.cache_hit }}&fetcher={{ filters.fetcher }}&sort={{ sort }}&descending={{ descending | lower }}&page={{ page + 1 }}">next →</a>{% endif %}
+</p>
+{% endif %}

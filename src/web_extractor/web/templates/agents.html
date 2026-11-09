@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Agents{% endblock %}
+{% block content %}
+<h1>Agents</h1>
+<p class="periods">
+  Period:
+  {% for p in ["24h", "7d", "30d"] %}
+    <a href="/agents?period={{ p }}" class="{{ 'active' if p == period else '' }}">{{ p }}</a>
+  {% endfor %}
+</p>
+
+{% if not summaries %}
+<p class="muted">No agent activity in this period.</p>
+{% endif %}
+
+<table>
+  <tr>
+    <th>agent</th><th class="num">requests</th><th class="num">ok</th><th class="num">errors</th>
+    <th class="num">cache hits</th><th class="num">distinct urls</th><th>most-read urls</th>
+  </tr>
+  {% for summary in summaries %}
+  <tr>
+    <td>{{ summary.agent }}</td>
+    <td class="num">{{ summary.total }}</td>
+    <td class="num">{{ summary.ok_count }}</td>
+    <td class="num">{{ summary.error_count }}</td>
+    <td class="num">{{ summary.cache_hits }}</td>
+    <td class="num">{{ summary.distinct_urls }}</td>
+    <td>{% for url in summary.top_urls %}<code>{{ url }}</code> {% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Top tasks</h2>
+{% if not top_tasks %}
+<p class="muted">No tasks recorded (agents did not pass task=).</p>
+{% else %}
+<table>
+  <tr><th>task</th><th class="num">requests</th></tr>
+  {% for item in top_tasks %}
+  <tr><td>{{ item.name }}</td><td class="num">{{ item.count }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}
