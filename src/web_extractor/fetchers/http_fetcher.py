@@ -22,7 +22,16 @@ import httpx
 
 from web_extractor.domain.fetch import Fetched, FetchFailure, FetchRequest, FetchResult
 from web_extractor.domain.ssrf import SsrfViolation, check_address
-from web_extractor.domain.types import Clock, HttpStatus, PositiveInt
+from web_extractor.domain.types import (
+    HTTP_BLOCKED_STATUSES,
+    HTTP_NOT_FOUND_STATUSES,
+    HTTP_OK_MAX,
+    HTTP_OK_MIN,
+    HTTP_TOO_MANY_REQUESTS,
+    Clock,
+    HttpStatus,
+    PositiveInt,
+)
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
 from web_extractor.fetchers.base import Resolver
 
@@ -34,18 +43,6 @@ _RETRY_AFTER_MAX_SECONDS = 86400
 
 type AddressChecker = Callable[[IPv4Address | IPv6Address], SsrfViolation | None]
 """SSRF decision over one address; production passes domain.check_address."""
-
-_HTTP_BLOCKED_STATUSES = (403, 429)
-"""Status codes reported as blocked (S5)."""
-
-_HTTP_NOT_FOUND_STATUSES = (404, 410)
-"""Status codes reported as not found."""
-
-_HTTP_TOO_MANY_REQUESTS = 429
-
-_HTTP_OK_MIN = 200
-
-_HTTP_OK_MAX = 299
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,10 +265,10 @@ class HttpFetcher:
         before the context closes.
         """
         status = HttpStatus(response.status_code)
-        if status.value in _HTTP_BLOCKED_STATUSES:
+        if status.value in HTTP_BLOCKED_STATUSES:
             retry_after = (
                 _parse_retry_after(response.headers.get("retry-after"), self._clock.now())
-                if status.value == _HTTP_TOO_MANY_REQUESTS
+                if status.value == HTTP_TOO_MANY_REQUESTS
                 else None
             )
             msg = f"{url} returned {status.value} (blocked)"
@@ -282,10 +279,10 @@ class HttpFetcher:
                 final_url=url,
                 retry_after_s=retry_after,
             )
-        if status.value in _HTTP_NOT_FOUND_STATUSES:
+        if status.value in HTTP_NOT_FOUND_STATUSES:
             msg = f"{url} returned {status.value} (not found)"
             return FetchFailure("not_found", msg, http_status=status, final_url=url)
-        if status.value < _HTTP_OK_MIN or status.value > _HTTP_OK_MAX:
+        if status.value < HTTP_OK_MIN or status.value > HTTP_OK_MAX:
             msg = f"{url} returned {status.value}"
             return FetchFailure("server_error", msg, http_status=status, final_url=url)
 

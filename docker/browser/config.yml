@@ -1,0 +1,26 @@
+# Overrides for the Crawl4AI container (docs/spikes/02, appendix):
+# a bounded browser pool below the core's own concurrency limit, a wall
+# clock that reclaims pages abandoned by clients, and text mode to keep
+# memory down. Mounted over /app/config.yml.
+crawler:
+  base_config:
+    simulate_user: true
+  memory_threshold_percent: 95.0
+  rate_limiter:
+    enabled: true
+    base_delay: [1.0, 2.0]
+  timeouts:
+    stream_init: 30.0
+    batch_process: 120.0
+  pool:
+    max_pages: 10
+    idle_ttl_sec: 300
+    max_pages_before_recycle: 200
+  browser:
+    kwargs:
+      headless: true
+      text_mode: true
+    extra_args:
+      - "--no-sandbox"
+      - "--disable-dev-shm-usage"
+      - "--disable-gpu"

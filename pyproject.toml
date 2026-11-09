@@ -110,6 +110,9 @@ select = [
     # Test data builders take several optional fields; that is fixture code,
     # not API surface.
     "PLR0913",
+    # Test fixtures carry stub credentials ("stub-token-for-tests"); bandit's
+    # hardcoded-password heuristic targets real secrets.
+    "S106",
 ]
 "src/web_extractor/fetchers/http_fetcher.py" = [
     # The file overrides httpcore.AsyncNetworkBackend.connect_tcp, whose
@@ -131,6 +134,11 @@ select = [
     # would fight FastAPI's binding mechanism.
     "PLR0913",
     "PLR0917",
+]
+"docker/browser/hc.py" = [
+    # The healthcheck script opens a fixed http://127.0.0.1:11235 literal;
+    # bandit's scheme-audit heuristic has nothing to guard here.
+    "S310",
 ]
 "tests/stand/stand.py" = [
     # Test infrastructure drives the docker CLI (fixed commands, no
