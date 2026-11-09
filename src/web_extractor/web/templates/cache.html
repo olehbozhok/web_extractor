@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Cache{% endblock %}
+{% block content %}
+<h1>Cache</h1>
+<form hx-get="/cache" hx-target="#cache-list" hx-push-url="false">
+  <input type="text" name="domain" value="{{ domain }}" placeholder="domain">
+  <button type="submit">Filter</button>
+</form>
+
+<div id="cache-list">
+{% include "cache_list.html" %}
+</div>
+{% endblock %}

@@ -1631,6 +1631,7 @@ dependencies = [
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-multipart" },
     { name = "trafilatura" },
     { name = "uvicorn" },
 ]
@@ -1653,6 +1654,7 @@ requires-dist = [
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-multipart", specifier = ">=0.0.33" },
     { name = "trafilatura" },
     { name = "uvicorn" },
 ]

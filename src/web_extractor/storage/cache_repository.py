@@ -7,6 +7,7 @@ from web_extractor.domain.types import ErrorKind
 from web_extractor.storage.database import Database
 from web_extractor.storage.rows import (
     as_fetcher,
+    as_int,
     as_opt_bytes,
     as_opt_error_kind,
     as_opt_int,
@@ -82,6 +83,38 @@ class CacheRepository:
             ),
         )
         await self._database.connection.commit()
+
+    async def list_entries(
+        self, *, domain: str | None = None, limit: int, offset: int
+    ) -> tuple[PageRecord, ...]:
+        """Entries ordered by fetch time descending; domain filters by LIKE."""
+        query = (
+            "SELECT url_key, final_url, status, http_status, fetcher, fetched_at, "
+            "expires_at, content_sha256, html, text, text_format, metadata_json, "
+            "error_kind, error_message FROM cache_pages"
+        )
+        params: list[str] = []
+        if domain is not None:
+            query += " WHERE url_key LIKE ?"
+            params.append(f"%://{domain}/%")
+        query += " ORDER BY fetched_at DESC, url_key ASC LIMIT ? OFFSET ?"
+        async with self._database.connection.execute(query, (*params, limit, offset)) as cursor:
+            rows = await cursor.fetchall()
+        return tuple(_record_from_row(row) for row in rows)
+
+    async def count_entries(self, *, domain: str | None = None) -> int:
+        """Number of cache entries, optionally filtered by domain."""
+        query = "SELECT COUNT(*) AS total FROM cache_pages"
+        params: list[str] = []
+        if domain is not None:
+            query += " WHERE url_key LIKE ?"
+            params.append(f"%://{domain}/%")
+        async with self._database.connection.execute(query, tuple(params)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            msg = "COUNT(*) did not yield a row"
+            raise RuntimeError(msg)
+        return as_int(row_value(row, "total"), "total")
 
     async def delete(self, url_key: str) -> bool:
         """Remove the entry; True when one existed."""

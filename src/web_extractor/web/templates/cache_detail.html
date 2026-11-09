@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Cache entry{% endblock %}
+{% block content %}
+<h1>Cache entry</h1>
+<table>
+  <tr><th>url key</th><td><code>{{ record.url_key }}</code></td></tr>
+  <tr><th>final url</th><td><code>{{ record.final_url }}</code></td></tr>
+  <tr><th>status</th><td>{{ record.status }} (http {{ record.http_status if record.http_status is not none else "–" }})</td></tr>
+  <tr><th>fetcher</th><td>{{ record.fetcher }}</td></tr>
+  <tr><th>fetched at</th><td>{{ record.fetched_at }}</td></tr>
+  <tr><th>expires at</th><td>{{ record.expires_at }}</td></tr>
+  <tr><th>content sha256</th><td><code>{{ record.content_sha256 if record.content_sha256 else "–" }}</code></td></tr>
+  <tr><th>error</th><td>{{ record.error_kind }} — {{ record.error_message if record.error_message else "" }}</td></tr>
+  <tr><th>metadata</th><td><code>{{ record.metadata_json }}</code></td></tr>
+  <tr>
+    <td colspan="2">
+      <form method="post" action="/cache/reload" style="display:inline">
+        <input type="hidden" name="url_key" value="{{ record.url_key }}">
+        <button type="submit">reload</button>
+      </form>
+      <form method="post" action="/cache/delete" style="display:inline">
+        <input type="hidden" name="url_key" value="{{ record.url_key }}">
+        <button type="submit">delete</button>
+      </form>
+      <a href="/cache">back to list</a>
+    </td>
+  </tr>
+</table>
+
+<h2>Extracted text ({{ record.text_format or "none" }})</h2>
+{% if record.text %}
+<pre>{{ record.text }}</pre>
+{% else %}
+<p class="muted">No extracted text stored.</p>
+{% endif %}
+
+<h2>Raw HTML</h2>
+{% if record.html %}
+<pre>{{ record.html | bytes_decoded }}</pre>
+{% else %}
+<p class="muted">No raw HTML stored (error entry).</p>
+{% endif %}
+{% endblock %}

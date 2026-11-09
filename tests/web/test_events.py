@@ -114,7 +114,6 @@ def test_events_pagination(tmp_path: Path) -> None:
             await repo.append(_event(f"r{number}", "alpha", f"https://x.test/{number}"))
         await db.close()
 
-
     asyncio.run(_seed())
     app = create_app(settings, clock=FakeClock())
     with TestClient(app) as test_client:

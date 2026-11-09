@@ -4,16 +4,21 @@ The UI never mutates data except the cache page's reload/delete buttons
 (stage 2 scope, docs/01_requirements.md section 4.7).
 """
 
+import logging
 from datetime import timedelta
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from web_extractor.domain.ttl import to_iso_utc
-from web_extractor.domain.types import Clock
+from web_extractor.domain.types import AgentId, Clock
+from web_extractor.service.pipeline import FetchService
+from web_extractor.service.types import ServiceRequest
+from web_extractor.storage.cache_repository import CacheRepository
 from web_extractor.storage.database import Database
 from web_extractor.storage.event_query import (
     EventFilter,
@@ -26,6 +31,8 @@ from web_extractor.storage.stats import collect_period_stats
 from web_extractor.web.view import dashboard_view, is_valid_period, period_hours
 
 _WEB_DIR = Path(__file__).parent
+
+logger = logging.getLogger("web_extractor.web")
 
 
 def sort_name(column: str) -> SortColumn:
@@ -58,12 +65,24 @@ def _templates() -> Jinja2Templates:
         loader=FileSystemLoader(str(_WEB_DIR / "templates")),
         autoescape=select_autoescape(enabled_extensions=("html", "jinja", "j2")),
     )
+    environment.filters["bytes_decoded"] = _bytes_decoded
     return Jinja2Templates(env=environment)
 
 
-def register_web_routes(router: APIRouter, database: Database, clock: Clock) -> None:
-    """Register the dashboard; more pages arrive in later milestones."""
+def _bytes_decoded(raw: bytes) -> str:
+    """Decode stored HTML for display; the template escapes it anyway."""
+    return raw.decode("utf-8", errors="replace")
+
+
+def register_web_routes(
+    router: APIRouter,
+    database: Database,
+    clock: Clock,
+    service: FetchService,
+) -> None:
+    """Register all pages; only reload/delete mutate data (docs/01, 4.7)."""
     templates = _templates()
+    cache_repository = CacheRepository(database)
 
     @router.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request, period: str = "24h") -> HTMLResponse:
@@ -169,3 +188,88 @@ def register_web_routes(router: APIRouter, database: Database, clock: Clock) -> 
             },
         )
         return HTMLResponse(content=rendered.body, status_code=rendered.status_code)
+
+    register_cache_routes(router, templates, clock, service, cache_repository)
+
+
+def register_cache_routes(
+    router: APIRouter,
+    templates: Jinja2Templates,
+    clock: Clock,
+    service: FetchService,
+    cache_repository: CacheRepository,
+) -> None:
+    """Cache list, detail, delete and reload; the only data-mutating pages."""
+
+    @router.get("/cache", response_class=HTMLResponse)
+    async def cache_page(
+        request: Request,
+        domain: str = "",
+        page: int = 1,
+    ) -> HTMLResponse:
+        """The cache entry list (S7)."""
+        if page < 1:
+            raise HTTPException(status_code=400, detail="page must be >= 1")
+        entries = await cache_repository.list_entries(
+            domain=domain or None, limit=_PAGE_SIZE, offset=(page - 1) * _PAGE_SIZE
+        )
+        total = await cache_repository.count_entries(domain=domain or None)
+        now_iso = to_iso_utc(clock.now())
+        rendered = templates.TemplateResponse(
+            request=request,
+            name="cache.html",
+            context={
+                "domain": domain,
+                "page": page,
+                "page_size": _PAGE_SIZE,
+                "total": total,
+                "entries": entries,
+                "now_iso": now_iso,
+            },
+        )
+        return HTMLResponse(content=rendered.body, status_code=rendered.status_code)
+
+    @router.get("/cache/detail", response_class=HTMLResponse)
+    async def cache_detail(request: Request, url_key: str) -> HTMLResponse:
+        """One cache entry: extracted text, raw HTML (escaped), metadata."""
+        record = await cache_repository.get(url_key)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such cache entry")
+        rendered = templates.TemplateResponse(
+            request=request,
+            name="cache_detail.html",
+            context={"record": record},
+        )
+        return HTMLResponse(content=rendered.body, status_code=rendered.status_code)
+
+    @router.post("/cache/delete")
+    async def cache_delete(url_key: Annotated[str, Form()]) -> RedirectResponse:
+        """Delete one cache entry and return to the list."""
+        await cache_repository.delete(url_key)
+        return RedirectResponse(url="/cache", status_code=303)
+
+    @router.post("/cache/reload")
+    async def cache_reload(url_key: Annotated[str, Form()]) -> RedirectResponse:
+        """Re-fetch the entry with fresh=true and return to the list.
+
+        The reload runs the same pipeline as an agent request; the journal
+        records it under the ``web_reload`` tool name with the ``web-ui``
+        agent, so a UI click is visible in the statistics like any request.
+        """
+        request = ServiceRequest(
+            raw_url=url_key,
+            fresh=True,
+            render="static",
+            page_format="text",
+            detail="concise",
+            agent=AgentId("web-ui"),
+            tool="web_reload",
+            request_id=f"web-{clock.now().timestamp():.0f}",
+        )
+        outcome = await service.fetch(request)
+        if outcome.status != "ok" and outcome.error_kind not in ("invalid_argument",):
+            # A blocked/timeout reload still updates the cache entry; keep
+            # the redirect but surface the status via the list (which shows
+            # the record's stored status).
+            logger.warning("cache reload ended with %s: %s", outcome.status, url_key)
+        return RedirectResponse(url="/cache", status_code=303)

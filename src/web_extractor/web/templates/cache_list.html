@@ -1,0 +1,35 @@
+<p class="muted">{{ total }} entries{% if total > page_size %}; page {{ page }} of {{ ((total - 1) // page_size) + 1 }}{% endif %}</p>
+<table>
+  <tr>
+    <th>url</th><th>status</th><th class="num">http</th><th>fetcher</th>
+    <th>fetched at</th><th>expires</th><th class="num">html bytes</th><th>sha256</th><th>actions</th>
+  </tr>
+  {% for record in entries %}
+  <tr>
+    <td><a href="/cache/detail?url_key={{ record.url_key | urlencode }}"><code>{{ record.url_key }}</code></a></td>
+    <td>{{ record.status }}</td>
+    <td class="num">{{ record.http_status if record.http_status is not none else "–" }}</td>
+    <td>{{ record.fetcher }}</td>
+    <td>{{ record.fetched_at }}</td>
+    <td>{{ record.expires_at }}{% if record.expires_at <= now_iso %} <strong class="muted">(stale)</strong>{% endif %}</td>
+    <td class="num">{{ record.html | length if record.html else "–" }}</td>
+    <td><code>{{ record.content_sha256[:12] if record.content_sha256 else "–" }}</code></td>
+    <td>
+      <form method="post" action="/cache/reload" style="display:inline">
+        <input type="hidden" name="url_key" value="{{ record.url_key }}">
+        <button type="submit">reload</button>
+      </form>
+      <form method="post" action="/cache/delete" style="display:inline">
+        <input type="hidden" name="url_key" value="{{ record.url_key }}">
+        <button type="submit">delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% if total > page_size %}
+<p>
+  {% if page > 1 %}<a href="/cache?domain={{ domain | urlencode }}&page={{ page - 1 }}">← prev</a>{% endif %}
+  {% if page * page_size < total %}<a href="/cache?domain={{ domain | urlencode }}&page={{ page + 1 }}">next →</a>{% endif %}
+</p>
+{% endif %}

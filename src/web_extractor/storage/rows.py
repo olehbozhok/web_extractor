@@ -101,6 +101,7 @@ _TOOL_TABLE: dict[str, ToolName] = {
     "read_more": "read_more",
     "find_in_page": "find_in_page",
     "check_urls": "check_urls",
+    "web_reload": "web_reload",
 }
 
 _ERROR_KIND_TABLE: dict[str, ErrorKind] = {
