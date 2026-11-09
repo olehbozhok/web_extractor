@@ -176,8 +176,12 @@ class UrlRow(BaseModel):
     error_kind: str | None = None
 
 
-class ToolMeta(BaseModel):
-    """The ``structuredContent`` payload: metadata only, never the body."""
+class PageMeta(BaseModel):
+    """``structuredContent`` of fetch_page and read_more: one page, never the body.
+
+    Every field describes this page; ``None`` means the page does not have it
+    (e.g. ``published_at`` is None when the page states no structured date).
+    """
 
     status: str
     url: str
@@ -186,12 +190,12 @@ class ToolMeta(BaseModel):
     fetched_at: str | None = None
     from_cache: bool = False
     fetcher: str | None = None
-    text_version: str | None = None
+    text_version: str
     text_format: PageFormat | None = None
-    chars_start: int | None = None
-    chars_end: int | None = None
-    chars_total: int | None = None
-    truncated: bool | None = None
+    chars_start: int
+    chars_end: int
+    chars_total: int
+    truncated: bool
     cursor: str | None = None
     title: str | None = None
     author: str | None = None
@@ -199,17 +203,50 @@ class ToolMeta(BaseModel):
     published_source: str | None = None
     document: DocumentKind | None = None
     content_type: str | None = None
-    content_quality: ContentQuality | None = None
-    matches: tuple[MatchRow, ...] | None = None
-    total_matches: int | None = None
-    ignore_case: bool | None = None
-    url_rows: tuple[UrlRow, ...] | None = None
-    summary: str | None = None
-    error_kind: str | None = None
-    error_message: str | None = None
+    """Only in ``detail=detailed`` responses."""
+    content_quality: ContentQuality
 
 
-def _text_response(meta: ToolMeta, body: str) -> CallToolResult:
+class FindMeta(BaseModel):
+    """``structuredContent`` of find_in_page: the searched page and its matches."""
+
+    status: str
+    url: str
+    final_url: str | None = None
+    from_cache: bool = False
+    text_version: str
+    text_format: PageFormat | None = None
+    chars_total: int
+    title: str | None = None
+    published_at: str | None = None
+    published_source: str | None = None
+    document: DocumentKind | None = None
+    content_quality: ContentQuality
+    ignore_case: bool
+    total_matches: int
+    matches: tuple[MatchRow, ...]
+
+
+class CheckUrlsMeta(BaseModel):
+    """``structuredContent`` of check_urls: per-URL rows only, no page fields at the root."""
+
+    status: str
+    urls_checked: int
+    duplicates_skipped: int
+    summary: str
+    url_rows: tuple[UrlRow, ...]
+
+
+class ErrorMeta(BaseModel):
+    """``structuredContent`` of any failed call."""
+
+    status: str = "error"
+    url: str | None = None
+    error_kind: str
+    error_message: str
+
+
+def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> CallToolResult:
     """A successful response: text block plus metadata-only structured part."""
     return CallToolResult(
         content=[TextContent(type="text", text=body)],
@@ -218,13 +255,12 @@ def _text_response(meta: ToolMeta, body: str) -> CallToolResult:
     )
 
 
-def _error_response(meta: ToolMeta, kind: ErrorKind, message: str) -> CallToolResult:
+def _error_response(url: str | None, kind: ErrorKind, message: str) -> CallToolResult:
     """An error response: ``ERROR kind: ...`` text with structured kind."""
+    meta = ErrorMeta(url=url, error_kind=kind, error_message=message)
     return CallToolResult(
         content=[TextContent(type="text", text=error_text(kind, message))],
-        structured_content=meta.model_copy(
-            update={"status": "error", "error_kind": kind, "error_message": message}
-        ).model_dump(mode="json"),
+        structured_content=meta.model_dump(mode="json"),
         is_error=True,
     )
 
@@ -528,9 +564,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
     outcome = await deps.service.fetch(request)
     if outcome.status != "ok":
         return _error_response(
-            ToolMeta(status=outcome.status, url=outcome.url, error_kind=outcome.error_kind),
-            _kind_of(outcome),
-            outcome.error_message or outcome.status,
+            outcome.url, _kind_of(outcome), outcome.error_message or outcome.status
         )
 
     text = outcome.text or ""
@@ -558,7 +592,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         lines.append(cursor_line(cursor_id))
     lines.append(fenced_body(shown))
 
-    meta = ToolMeta(
+    meta = PageMeta(
         status="ok",
         url=outcome.url,
         final_url=outcome.final_url,
@@ -614,7 +648,7 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
             if read.next_cursor_id is not None:
                 lines.append(cursor_line(read.next_cursor_id))
             lines.append(fenced_body(read.slice_text))
-            meta = ToolMeta(
+            meta = PageMeta(
                 status="ok",
                 url=read.state.url_key,
                 from_cache=True,
@@ -650,8 +684,7 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 ),
                 started,
             )
-            meta = ToolMeta(status="error", url=cursor)
-            return _error_response(meta, "unknown_cursor", message)
+            return _error_response(cursor, "unknown_cursor", message)
         case StaleCursor():
             message = f"the page {read.url_key} changed after the cursor was issued"
             await deps.service.journal_read(
@@ -664,8 +697,7 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 ),
                 started,
             )
-            meta = ToolMeta(status="error", url=read.url_key)
-            return _error_response(meta, "stale_cursor", message)
+            return _error_response(read.url_key, "stale_cursor", message)
 
 
 async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolResult:
@@ -684,9 +716,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
     outcome = await deps.service.fetch(request)
     if outcome.status != "ok":
         return _error_response(
-            ToolMeta(status=outcome.status, url=outcome.url, error_kind=outcome.error_kind),
-            _kind_of(outcome),
-            outcome.error_message or outcome.status,
+            outcome.url, _kind_of(outcome), outcome.error_message or outcome.status
         )
 
     text = outcome.text or ""
@@ -736,7 +766,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
             lines.append(f"match {number}: offset {match.offset} ({flag}) cursor {cursor_id}")
             lines.append(f"  ...{match.before}[{match.match}]{match.after}...")
 
-    meta = ToolMeta(
+    meta = FindMeta(
         status="ok",
         url=outcome.url,
         final_url=outcome.final_url,
@@ -811,7 +841,13 @@ async def _check_urls(deps: McpToolDeps, args: _CheckUrlsArgs) -> CallToolResult
     if duplicates:
         lines.append(f"note: {duplicates} duplicate URL(s) skipped; each URL was checked once")
 
-    meta = ToolMeta(status="ok", url=args.urls[0], url_rows=tuple(rows), summary=summary)
+    meta = CheckUrlsMeta(
+        status="ok",
+        urls_checked=len(unique_urls),
+        duplicates_skipped=duplicates,
+        summary=summary,
+        url_rows=tuple(rows),
+    )
     return _text_response(meta, "\n".join(lines))
 
 
@@ -885,9 +921,7 @@ async def _rejected(
 ) -> CallToolResult:
     """Journal an argument-level rejection and format its error response."""
     outcome = await deps.service.record_rejection(request, kind, message)
-    return _error_response(
-        ToolMeta(status="error", url=outcome.url, error_kind=kind), kind, message
-    )
+    return _error_response(outcome.url, kind, message)
 
 
 def _kind_of(outcome: FetchOutcome) -> ErrorKind:

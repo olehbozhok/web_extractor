@@ -274,3 +274,34 @@ async def test_every_page_reporting_tool_gives_the_date_the_same_way(mcp: McpHar
     assert "published: 2026-03-01 (meta)" in _text_of(found)
     assert found.structured_content is not None
     assert found.structured_content["published_source"] == "meta"
+
+
+@pytest.mark.asyncio
+async def test_check_urls_root_has_no_page_fields(mcp: McpHarness) -> None:
+    """Page fields live in url_rows; the root never shows a null in their place."""
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    result = await _call(mcp, "check_urls", {"urls": [_URL, _URL]})
+
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {
+        "status",
+        "urls_checked",
+        "duplicates_skipped",
+        "summary",
+        "url_rows",
+    }
+    assert result.structured_content["urls_checked"] == 1
+    assert result.structured_content["duplicates_skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_error_root_carries_only_error_fields(mcp: McpHarness) -> None:
+    mcp.fetcher.script(FetchFailure("dns", "no such host", final_url=normalized(_URL)))
+
+    result = await _call(mcp, "fetch_page", {"url": _URL})
+
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {"status", "url", "error_kind", "error_message"}
+    assert result.structured_content["status"] == "error"
