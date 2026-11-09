@@ -1,0 +1,96 @@
+[project]
+name = "web-extractor"
+version = "0.1.0"
+description = "Shared local web-fetching service for LLM agents: MCP interface, cache, extraction, event log, web UI."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite",
+    "fastapi",
+    "httpx",
+    "jinja2",
+    "mcp",
+    "pydantic",
+    "pydantic-settings",
+    "trafilatura",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "respx",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "web_extractor"
+module-root = "src"
+
+[tool.mypy]
+strict = true
+warn_unreachable = true
+disallow_any_explicit = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-expr",
+    "truthy-bool",
+]
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+python_version = "3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# docs/ holds historical spike records with embedded scripts; they are not
+# linted code and must not be reflowed by the formatter.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "A",     # flake8-builtins
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "ARG",   # flake8-unused-arguments
+    "PL",    # pylint
+    "PTH",   # flake8-use-pathlib
+    "TRY",   # tryceratops
+    "RUF",   # ruff-specific
+    "S",     # flake8-bandit
+    "ASYNC", # flake8-async
+    "PERF",  # perflint
+    "ANN",   # flake8-annotations
+    "T20",   # flake8-print
+    "DTZ",   # flake8-datetimez
+    "ERA",   # eradicate (commented-out code)
+    "FBT",   # flake8-boolean-trap
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest provides no test mechanism without `assert`; S101 (bandit) targets
+# production code that silently relies on asserts under -O. Narrow, documented
+# exception limited to tests (AGENTS.md section 3 requires reporting exceptions).
+"tests/**" = ["S101"]
+
+
