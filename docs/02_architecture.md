@@ -96,7 +96,7 @@ CREATE TABLE events (
   ts             TEXT NOT NULL,
   agent          TEXT NOT NULL,
   task           TEXT,
-  mcp_session_id TEXT,
+  mcp_session_id TEXT,                    -- NULL, якщо транспорт не надає сесії (нова специфікація MCP її не має)
   request_id     TEXT NOT NULL,
   tool           TEXT NOT NULL,
   url            TEXT NOT NULL,

@@ -11,6 +11,9 @@
 | [`AGENTS.md`](AGENTS.md) | правила роботи агента: порядок, типізація, помилки, тести, безпека |
 | [`docs/01_requirements.md`](docs/01_requirements.md) | навіщо, межі, сценарії, функціональні й нефункціональні вимоги, етапи, стек |
 | [`docs/02_architecture.md`](docs/02_architecture.md) | компоненти, шари, ключові типи, схема БД, контракт браузерного конектора |
+| [`docs/03_mcp_interface.md`](docs/03_mcp_interface.md) | аналіз і дизайн MCP-інтерфейсу для ШІ-агентів: інструменти, формат відповіді, помилки, ідентифікація |
+| [`docs/04_plan.md`](docs/04_plan.md) | план реалізації за віхами, залежності, ризики |
+| [`docs/spikes/`](docs/spikes/01_crawl4ai.md) | результати досліджень: Crawl4AI ([01](docs/spikes/01_crawl4ai.md)), ізоляція, відновлення, RAM ([02](docs/spikes/02_egress_isolation.md)) |
 
 ## Етапи
 
