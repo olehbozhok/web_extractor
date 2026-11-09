@@ -91,6 +91,18 @@ CREATE TABLE cache_pages (
   error_message  TEXT
 );
 
+CREATE TABLE cursors (            -- короткі курсори пагінації для MCP (docs/03, 3.3)
+  id             TEXT PRIMARY KEY,      -- 6 символів, алфавіт без двозначних
+  url_key        TEXT NOT NULL,
+  text_sha256    TEXT NOT NULL,         -- версія тексту, для якої створений курсор
+  offset         INTEGER NOT NULL,
+  max_chars      INTEGER NOT NULL,
+  format         TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  expires_at     TEXT NOT NULL,
+  UNIQUE (url_key, text_sha256, offset, max_chars, format)   -- один і той самий стан дає той самий курсор
+);
+
 CREATE TABLE events (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   ts             TEXT NOT NULL,
