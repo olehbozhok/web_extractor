@@ -14,7 +14,7 @@ type ContentQuality = Literal["ok", "thin", "login_wall", "challenge"]
 ``login_wall``: a sign-in prompt instead of the content; ``challenge``: a
 bot check (captcha, JS challenge)."""
 
-THIN_CHARS: Final = 500
+THIN_CHARS: Final = 800
 """Below this many characters a page is too small to count as a document."""
 
 MARKER_SCAN_CHARS: Final = 3000
@@ -30,6 +30,12 @@ _CHALLENGE_MARKERS: Final = (
     "attention required",
     "are you a robot",
     "captcha",
+    "blocked by network security",
+    "whoa there, pardner",
+    "please wait for verification",
+    "javascript is not available",
+    "javascript is disabled",
+    "something went wrong, but don't fret",
     "підтвердьте, що ви не робот",
     "я не робот",
 )

@@ -25,8 +25,11 @@ _META_MARKERS: Final = (
 )
 
 
-def find_date_source(html: str, final_url: str, published_at: str) -> DateSource:
-    """Classify the provenance of ``published_at`` (ISO-like date text)."""
+def find_date_source(html: str, final_url: str, published_at: str) -> DateSource | None:
+    """Classify the provenance of ``published_at`` (ISO-like date text).
+
+    None means there is no evidence the date is a publication date (it was
+    guessed from body text): the caller must discard it."""
     lowered = html.lower()
     if any(marker in lowered for marker in _JSON_LD_MARKERS):
         return "json_ld"
@@ -34,7 +37,7 @@ def find_date_source(html: str, final_url: str, published_at: str) -> DateSource
         return "meta"
     if _date_in_url(final_url, published_at):
         return "url"
-    return "text"
+    return None
 
 
 def _date_in_url(url: str, published_at: str) -> bool:

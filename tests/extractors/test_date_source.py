@@ -19,11 +19,11 @@ _URL = "https://news.test/story"
         ),
         ('<meta property="article:published_time" content="2026-03-01">', _URL, "meta"),
         ("<p>Posted yesterday</p>", "https://news.test/2026/03/01/story", "url"),
-        ("<p>Published 1 March 2026</p>", _URL, "text"),
+        ("<p>Published 1 March 2026</p>", _URL, None),
         ('"datePublished" and article:published_time', _URL, "json_ld"),
     ],
 )
-def test_source_classification(*, html: str, url: str, expected: DateSource) -> None:
+def test_source_classification(*, html: str, url: str, expected: DateSource | None) -> None:
     assert find_date_source(html, url, "2026-03-01") == expected
 
 
@@ -48,6 +48,20 @@ async def test_extractor_reports_date_and_its_source() -> None:
 async def test_no_date_means_no_source() -> None:
     body = "<p>" + "A full paragraph of the article body, with enough words. " * 20 + "</p>"
     html = f"<html><body><article>{body}</article></body></html>".encode()
+
+    result = await TrafilaturaExtractor().extract(html, _URL, "text")
+
+    assert isinstance(result, Extracted)
+    assert result.metadata.published_at is None
+    assert result.metadata.published_source is None
+
+
+@pytest.mark.asyncio
+async def test_date_guessed_from_body_text_is_discarded() -> None:
+    body = "<p>" + "A full paragraph of the article body, with enough words. " * 20 + "</p>"
+    html = (
+        f"<html><body><article><p>Posted on January 1, 2026</p>{body}</article></body></html>"
+    ).encode()
 
     result = await TrafilaturaExtractor().extract(html, _URL, "text")
 

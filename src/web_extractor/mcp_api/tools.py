@@ -49,6 +49,9 @@ from web_extractor.service.types import FetchOutcome, ServiceRequest
 
 logger = logging.getLogger("web_extractor.mcp")
 
+_MATCH_COUNT_CAP = 1000
+"""find_in_page counts matches up to this many; the response lists at most max_matches."""
+
 _CHECK_FORMAT: PageFormat = "markdown"
 """check_urls measures the same text fetch_page returns by default, so the length
 and ``text_version`` of a checked URL match a following ``fetch_page`` call."""
@@ -189,6 +192,7 @@ class ToolMeta(BaseModel):
     published_source: str | None = None
     content_quality: ContentQuality | None = None
     matches: tuple[MatchRow, ...] | None = None
+    total_matches: int | None = None
     url_rows: tuple[UrlRow, ...] | None = None
     summary: str | None = None
     error_kind: str | None = None
@@ -414,7 +418,7 @@ def _register_find_in_page(server: MCPServer[object], deps: McpToolDeps) -> None
         url: str,
         query: Annotated[str, Field(min_length=1, max_length=2000)],
         *,
-        ignore_case: bool = False,
+        ignore_case: bool = True,
         context_chars: Annotated[int, Field(ge=0, le=1000)] = 200,
         max_matches: Annotated[int, Field(ge=1, le=20)] = 5,
         fresh: bool = False,
@@ -583,6 +587,11 @@ async def _read_more(deps: McpToolDeps, cursor: str, context: ToolContext) -> Ca
                 chars_total=read.total_chars,
                 truncated=read.has_more,
                 cursor=read.next_cursor_id,
+                title=read.metadata.title,
+                author=read.metadata.author,
+                published_at=read.metadata.published_at,
+                published_source=read.metadata.published_source,
+                content_quality=read.content_quality,
             )
             await deps.service.journal_read(
                 request,
@@ -654,7 +663,17 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
     lines = _header_lines(outcome, "concise", deps.clock.now())
     lines.append(f"content: {quality}")
     lines.append(f"text_version: {version} (text)")
-    lines.append(f"matches: {len(matches)}")
+    total = len(
+        find_matches(
+            text,
+            args.query,
+            ignore_case=args.ignore_case,
+            context_chars=0,
+            max_matches=_MATCH_COUNT_CAP,
+        )
+    )
+    case_mode = "insensitive" if args.ignore_case else "sensitive"
+    lines.append(f"matches: {len(matches)} of {total} (case-{case_mode})")
     if not matches:
         lines.append(
             f"No match for {args.query!r}. The text has {len(text)} characters; "
@@ -692,6 +711,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
             for match in matches
         ),
         content_quality=quality,
+        total_matches=total,
         title=outcome.metadata.title,
     )
     return _text_response(meta, "\n".join(lines))

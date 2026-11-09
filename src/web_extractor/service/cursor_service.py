@@ -11,7 +11,8 @@ import hashlib
 from dataclasses import dataclass
 from datetime import timedelta
 
-from web_extractor.domain.extract import Extracted
+from web_extractor.domain.content_quality import ContentQuality, assess_content
+from web_extractor.domain.extract import Extracted, PageMetadata, parse_metadata_json
 from web_extractor.domain.records import PageRecord
 from web_extractor.domain.ttl import to_iso_utc
 from web_extractor.domain.types import Clock, PageFormat
@@ -34,6 +35,10 @@ class CursorText:
     has_more: bool
     next_cursor_id: str | None
     """Issued only when ``has_more``; points at the end of this slice."""
+    metadata: PageMetadata
+    """The page's metadata, so a continuation does not lose title, author, date."""
+    content_quality: ContentQuality
+    """The verdict on the whole text, not on the slice."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +135,8 @@ class CursorService:
             total_chars=len(full_text),
             has_more=has_more,
             next_cursor_id=next_cursor,
+            metadata=parse_metadata_json(record.metadata_json),
+            content_quality=assess_content(full_text),
         )
 
     async def _text_in_format(self, record: PageRecord, page_format: PageFormat) -> str | None:

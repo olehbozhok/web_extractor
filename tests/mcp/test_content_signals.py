@@ -143,3 +143,49 @@ async def test_version_headers_name_their_format(mcp: McpHarness) -> None:
 
     assert "(markdown)" in _text_of(page).split("text_version:")[1].splitlines()[0]
     assert "(text)" in _text_of(found).split("text_version:")[1].splitlines()[0]
+
+
+@pytest.mark.asyncio
+async def test_find_in_page_is_case_insensitive_by_default_and_reports_total(
+    mcp: McpHarness,
+) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted("ПФЖ; ПФЖ; пфж.", page_format="text"))
+
+    result = await _call(mcp, "find_in_page", {"url": _URL, "query": "пфж", "max_matches": 2})
+
+    assert result.structured_content is not None
+    assert result.structured_content["total_matches"] == 3
+    assert len(result.structured_content["matches"]) == 2
+    assert result.structured_content["matches"][0]["verbatim"] is False  # case differed
+    assert "matches: 2 of 3 (case-insensitive)" in _text_of(result)
+
+
+@pytest.mark.asyncio
+async def test_case_sensitive_search_is_still_available(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted("ПФЖ; ПФЖ; пфж.", page_format="text"))
+
+    result = await _call(mcp, "find_in_page", {"url": _URL, "query": "пфж", "ignore_case": False})
+
+    assert result.structured_content is not None
+    assert result.structured_content["total_matches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_read_more_keeps_page_metadata(mcp: McpHarness) -> None:
+    metadata = PageMetadata(
+        title="Long story", author="A. Writer", published_at="2026-03-01", published_source="meta"
+    )
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
+    first = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
+    assert first.structured_content is not None
+
+    more = await _call(mcp, "read_more", {"cursor": first.structured_content["cursor"]})
+
+    assert more.structured_content is not None
+    assert more.structured_content["title"] == "Long story"
+    assert more.structured_content["author"] == "A. Writer"
+    assert more.structured_content["published_at"] == "2026-03-01"
+    assert more.structured_content["content_quality"] == "ok"

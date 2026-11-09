@@ -299,3 +299,14 @@ async def test_pdf_and_generic_types_pass_through(content_type: str) -> None:
         result = await fetcher.fetch(_request(server.url_for(_HOST, "/doc")))
     assert isinstance(result, Fetched)
     assert result.body == b"%PDF-1.7"
+
+
+@pytest.mark.asyncio
+async def test_401_is_blocked_not_server_error() -> None:
+    with LoopbackHttpServer(lambda _path, _headers: ScriptedResponse(401, {}, b"login")) as server:
+        resolver = StaticResolver({_HOST: [IPv4Address("127.0.0.1")]})
+        fetcher = _fetcher(server.port, resolver)
+        result = await fetcher.fetch(_request(server.url_for(_HOST, "/private")))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+    assert result.http_status is not None and result.http_status.value == 401

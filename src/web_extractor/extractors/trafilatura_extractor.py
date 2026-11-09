@@ -28,7 +28,7 @@ _JS_REQUIRED_MARKERS = (
 )
 """Lowercase markers of JS-only pages; detection is heuristic by design."""
 
-_JS_STUB_TEXT_LIMIT = 200
+_JS_STUB_TEXT_LIMIT = 1000
 """Short extractions over a page that also carries JS-required markers are
 treated as JS-only stubs (trafilatura returns the noscript boilerplate)."""
 
@@ -73,21 +73,23 @@ class TrafilaturaExtractor:
     def _metadata(self, html: bytes, final_url: str) -> PageMetadata:
         """Best-effort metadata; absence of any field stays None."""
         try:
-            document = trafilatura.extract_metadata(html, default_url=final_url)
+            document = trafilatura.extract_metadata(html, default_url=final_url, extensive=False)
         except UnicodeDecodeError:
             document = None
         if document is None:
             return PageMetadata()
-        published_at = document.date or None
+        candidate = document.date or None
+        source = (
+            find_date_source(html.decode("utf-8", errors="replace"), final_url, candidate)
+            if candidate is not None
+            else None
+        )
+        published_at = candidate if source is not None else None
         return PageMetadata(
             title=document.title,
             author=document.author,
             published_at=published_at,
-            published_source=(
-                find_date_source(html.decode("utf-8", errors="replace"), final_url, published_at)
-                if published_at is not None
-                else None
-            ),
+            published_source=source,
             language=document.language,
             publisher=document.sitename,
         )
