@@ -132,6 +132,12 @@ select = [
     "PLR0913",
     "PLR0917",
 ]
+"tests/stand/stand.py" = [
+    # Test infrastructure drives the docker CLI (fixed commands, no
+    # untrusted input): bandit's subprocess heuristics don't apply.
+    "S603",
+    "S607",
+]
 "evals/run.py" = [
     # A CLI entry point: the report goes to stdout by design.
     "T20",
