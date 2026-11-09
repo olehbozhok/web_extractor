@@ -25,7 +25,7 @@ _URL = "https://site.test/article"
 
 
 @pytest.fixture
-def harness(tmp_path: Path) -> Iterator[tuple[TestClient, ScriptedFetcher, ScriptedFetcher]]:
+def harness(tmp_path: Path) -> Iterator[tuple[TestClient, ScriptedFetcher, ScriptedExtractor]]:
     """A TestClient plus the scripted fetcher used for reload calls."""
     settings = Settings(db_path=str(tmp_path / "web.db"))
     fetcher = ScriptedFetcher()
@@ -62,7 +62,7 @@ def harness(tmp_path: Path) -> Iterator[tuple[TestClient, ScriptedFetcher, Scrip
 
 
 def test_cache_list_shows_entry(
-    harness: tuple[TestClient, ScriptedFetcher, ScriptedFetcher],
+    harness: tuple[TestClient, ScriptedFetcher, ScriptedExtractor],
 ) -> None:
     client, _fetcher, _extractor = harness
     html = client.get("/cache").text
@@ -72,7 +72,7 @@ def test_cache_list_shows_entry(
 
 
 def test_cache_detail_escapes_saved_html(
-    harness: tuple[TestClient, ScriptedFetcher, ScriptedFetcher],
+    harness: tuple[TestClient, ScriptedFetcher, ScriptedExtractor],
 ) -> None:
     """The stored page HTML must be displayed escaped, never executed (S: XSS)."""
     client, _fetcher, _extractor = harness
@@ -85,7 +85,7 @@ def test_cache_detail_escapes_saved_html(
 
 
 def test_cache_detail_missing_is_404(
-    harness: tuple[TestClient, ScriptedFetcher, ScriptedFetcher],
+    harness: tuple[TestClient, ScriptedFetcher, ScriptedExtractor],
 ) -> None:
     client, _fetcher, _extractor = harness
     response = client.get("/cache/detail", params={"url_key": "https://none.test/"})
@@ -93,7 +93,7 @@ def test_cache_detail_missing_is_404(
 
 
 def test_cache_delete_removes_entry(
-    harness: tuple[TestClient, ScriptedFetcher, ScriptedFetcher],
+    harness: tuple[TestClient, ScriptedFetcher, ScriptedExtractor],
 ) -> None:
     client, _fetcher, _extractor = harness
     response = client.post("/cache/delete", data={"url_key": _URL}, follow_redirects=False)
@@ -103,7 +103,7 @@ def test_cache_delete_removes_entry(
 
 
 def test_cache_reload_refetches_and_journals(
-    harness: tuple[TestClient, ScriptedFetcher, ScriptedFetcher],
+    harness: tuple[TestClient, ScriptedFetcher, ScriptedExtractor],
 ) -> None:
     client, fetcher, extractor = harness
     fetcher.script(fetched_ok(normalized(_URL)))
