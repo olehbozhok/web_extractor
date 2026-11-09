@@ -91,6 +91,13 @@ select = [
 # pytest provides no test mechanism without `assert`; S101 (bandit) targets
 # production code that silently relies on asserts under -O. Narrow, documented
 # exception limited to tests (AGENTS.md section 3 requires reporting exceptions).
-"tests/**" = ["S101"]
+"tests/**" = [
+    "S101",
+    # Magic values are the test data themselves (expected codes, ports, sizes).
+    "PLR2004",
+    # Test fixtures legitimately contain literals like "0.0.0.0"; bandit's
+    # bind-to-all-interfaces heuristic misfires on them.
+    "S104",
+]
 
 
