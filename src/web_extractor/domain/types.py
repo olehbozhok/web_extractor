@@ -27,6 +27,8 @@ type ErrorKind = Literal[
     "unknown_cursor",
     "stale_cursor",
     "internal",
+    "server_error",
+    "redirect_error",
 ]
 """Machine-readable kind of an expected failure (docs/03_mcp_interface.md, 5)."""
 
