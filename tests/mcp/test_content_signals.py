@@ -114,3 +114,32 @@ async def test_check_urls_deduplicates_and_reports_version_and_verdict(mcp: McpH
     assert len(rows) == 1
     assert rows[0]["content_quality"] == "thin"
     assert rows[0]["text_version"] is not None
+
+
+@pytest.mark.asyncio
+async def test_check_urls_and_fetch_page_agree_on_length_and_version(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+    page = await _call(mcp, "fetch_page", {"url": _URL})
+
+    check = await _call(mcp, "check_urls", {"urls": [_URL], "fresh": False})
+
+    assert page.structured_content is not None
+    assert check.structured_content is not None
+    row = check.structured_content["url_rows"][0]
+    assert row["text_version"] == page.structured_content["text_version"]
+    assert row["text_chars"] == page.structured_content["chars_total"]
+    assert row["text_format"] == page.structured_content["text_format"] == "markdown"
+
+
+@pytest.mark.asyncio
+async def test_version_headers_name_their_format(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+    mcp.extractor.script(extracted(_LONG, page_format="text"))
+
+    page = await _call(mcp, "fetch_page", {"url": _URL})
+    found = await _call(mcp, "find_in_page", {"url": _URL, "query": "sentence"})
+
+    assert "(markdown)" in _text_of(page).split("text_version:")[1].splitlines()[0]
+    assert "(text)" in _text_of(found).split("text_version:")[1].splitlines()[0]
