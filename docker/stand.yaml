@@ -1,0 +1,45 @@
+# The browser isolation stand (docs/spikes/02_egress_isolation.md).
+# Used by integration tests (tests/stand/): it reproduces the spike layout
+# - a "public internet" network with a redirector, a private network with
+# an internal target whose access log proves whether any request arrived,
+# and an internal core network for the core service (stage 3 adds Crawl4AI).
+#
+# Networks use fixed subnets and IPs exactly as in the spike.
+networks:
+  stand_core_net:
+    internal: true
+  stand_pub_net:
+    ipam:
+      config:
+        - subnet: 93.184.216.0/24
+  stand_priv_net:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+services:
+  redirector:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./redirector.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      stand_pub_net:
+        ipv4_address: 93.184.216.10
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  internal-target:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./internal-target.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      stand_priv_net:
+        ipv4_address: 172.30.0.20
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
