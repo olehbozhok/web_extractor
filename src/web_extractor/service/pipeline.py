@@ -83,6 +83,38 @@ class FetchService:
         self._clock = deps.clock
         self._config = deps.config
 
+    async def record_rejection(
+        self, request: ServiceRequest, error_kind: ErrorKind, message: str
+    ) -> FetchOutcome:
+        """Journal a request rejected before the pipeline ran (bad arguments).
+
+        The rejection never reaches the fetcher, so the MCP layer records
+        the event through this method instead.
+        """
+        started = self._clock.now()
+        outcome = FetchOutcome(
+            status="error",
+            url=request.raw_url.strip(),
+            error_kind=error_kind,
+            error_message=message,
+        )
+        await self._append_event(
+            request, outcome, started, _RequestMetrics(queue_ms=0, cache_hit=False, size_bytes=None)
+        )
+        return outcome
+
+    async def journal_read(
+        self, request: ServiceRequest, outcome: FetchOutcome, started: datetime
+    ) -> None:
+        """Journal a request served entirely from the cache (read_more).
+
+        Cursor reads never reach the fetcher, so the MCP layer journals
+        them through this method with the outcome it built.
+        """
+        await self._append_event(
+            request, outcome, started, _RequestMetrics(queue_ms=0, cache_hit=True, size_bytes=None)
+        )
+
     async def fetch(self, request: ServiceRequest) -> FetchOutcome:
         """Run the pipeline; every request ends with exactly one event."""
         started = self._clock.now()

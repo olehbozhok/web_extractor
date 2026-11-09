@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from web_extractor.domain.extract import Extracted, ExtractResult, PageMetadata
 from web_extractor.domain.fetch import Fetched, FetchFailure, FetchRequest, FetchResult
@@ -90,5 +91,7 @@ def sha_of(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
-def extracted(text: str = "Main page text.") -> Extracted:
-    return Extracted(text=text, format="text", metadata=PageMetadata(title="Title"))
+def extracted(
+    text: str = "Main page text.", page_format: Literal["markdown", "text"] = "text"
+) -> Extracted:
+    return Extracted(text=text, format=page_format, metadata=PageMetadata(title="Title"))
