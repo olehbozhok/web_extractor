@@ -39,6 +39,8 @@ class AgentResult:
     meta: Mapping[str, object] = field(default_factory=dict)
     calls: int = 0
     tool_errors: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class EvalAgent(Protocol):
@@ -65,6 +67,8 @@ async def run_corpus(
                 passed=passed,
                 calls=agent_result.calls,
                 tool_errors=agent_result.tool_errors,
+                input_tokens=agent_result.input_tokens,
+                output_tokens=agent_result.output_tokens,
                 duration_s=round(duration, 3),
                 reason=reason,
             )
