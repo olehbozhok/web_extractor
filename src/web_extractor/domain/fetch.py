@@ -22,8 +22,12 @@ type FetchFailureKind = Literal[
     "too_large",
     "network",
     "ssrf_blocked",
+    "server_error",
+    "redirect_error",
 ]
-"""Expected fetch failures; ``blocked`` covers 403/429 and anti-bot walls."""
+"""Expected fetch failures; ``blocked`` covers 403/429 and anti-bot walls,
+``server_error`` other 4xx/5xx responses, ``redirect_error`` redirect loops
+or excessive redirect chains."""
 
 type FetchResult = Fetched | FetchFailure
 """Result of a fetch attempt: success or an expected failure value."""

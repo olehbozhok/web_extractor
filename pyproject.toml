@@ -99,5 +99,11 @@ select = [
     # bind-to-all-interfaces heuristic misfires on them.
     "S104",
 ]
+"src/web_extractor/fetchers/http_fetcher.py" = [
+    # The file overrides httpcore.AsyncNetworkBackend.connect_tcp, whose
+    # signature (with a `timeout` parameter) is fixed by the httpcore API;
+    # ASYNC109's asyncio.timeout advice does not apply to overrides.
+    "ASYNC109",
+]
 
 

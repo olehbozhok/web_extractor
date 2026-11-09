@@ -113,6 +113,8 @@ _ERROR_KIND_TABLE: dict[str, ErrorKind] = {
     "unknown_cursor": "unknown_cursor",
     "stale_cursor": "stale_cursor",
     "internal": "internal",
+    "server_error": "server_error",
+    "redirect_error": "redirect_error",
 }
 
 
