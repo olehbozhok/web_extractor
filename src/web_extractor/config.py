@@ -25,8 +25,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="WX_", env_file=None, extra="forbid")
 
-    host: Literal["127.0.0.1"] = "127.0.0.1"
-    """Loopback only: the service never listens on external interfaces."""
+    host: Literal["127.0.0.1", "0.0.0.0"] = "127.0.0.1"
+    """Bind address. ``0.0.0.0`` exists only for containers, where compose
+    publishes the port on the host's 127.0.0.1; outside Docker keep the
+    default so the service never listens on external interfaces."""
 
     port: int = Field(default=8321, ge=1, le=65535)
 
