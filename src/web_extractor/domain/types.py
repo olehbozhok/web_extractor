@@ -48,8 +48,9 @@ type DetailLevel = Literal["concise", "detailed"]
 type FetcherName = Literal["http", "browser"]
 """Which fetcher produced a page."""
 
-type ToolName = Literal["fetch_page", "read_more", "find_in_page", "check_urls"]
-"""MCP tool names; every recorded event belongs to exactly one of these."""
+type ToolName = Literal["fetch_page", "read_more", "find_in_page", "check_urls", "web_reload"]
+"""Tool names; ``web_reload`` is the web UI's cache reload button and the
+rest are the MCP tools (docs/03). Every recorded event names exactly one."""
 
 
 class Clock(Protocol):

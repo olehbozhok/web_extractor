@@ -13,6 +13,7 @@ dependencies = [
     "mcp",
     "pydantic",
     "pydantic-settings",
+    "python-multipart>=0.0.33",
     "trafilatura",
     "uvicorn",
 ]

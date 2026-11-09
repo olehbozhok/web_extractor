@@ -159,7 +159,7 @@ def create_app(
     app.state.mcp_server = server
 
     web_router = APIRouter()
-    register_web_routes(web_router, database, service_clock)
+    register_web_routes(web_router, database, service_clock, service)
     app.include_router(web_router)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
