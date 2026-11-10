@@ -1,6 +1,7 @@
 """BrowserFetcher tests: mapping /crawl answers per the verified contract."""
 
 import json
+from dataclasses import replace
 from ipaddress import IPv4Address
 
 import httpx
@@ -29,6 +30,7 @@ def _config() -> BrowserFetcherConfig:
         page_timeout_ms=15000,
         max_concurrent=2,
         allowed_ports=(80, 443, 8080, 8443),
+        max_response_bytes=10_000_000,
     )
 
 
@@ -96,12 +98,67 @@ async def test_404_maps_to_not_found() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_oversized_response_is_too_large() -> None:
+    """The size limit applies to the browser like to the static fetcher
+    (docs/01, 4.5): an arbitrary body must not reach cache and extraction."""
+    fetcher = BrowserFetcher(
+        replace(_config(), max_response_bytes=100),
+        FakeClock(),
+        StaticResolver({"site.test": [IPv4Address("8.8.8.8")]}),
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(
+        return_value=_answer_for(_crawl_payload(html="x" * 101))
+    )
+
+    result = await fetcher.fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "too_large"
+    assert "limit is 100" in result.message
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_403_maps_to_blocked() -> None:
     payload = _crawl_payload(status_code=403, redirected_status_code=403)
     respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
     result = await _fetcher().fetch(_request())
     assert isinstance(result, FetchFailure)
     assert result.kind == "blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_429_keeps_its_retry_after_header() -> None:
+    """docs/01, 4.5: a 429 must not be retried before Retry-After; the
+    browser path carries the header into the failure like the static one."""
+    payload = _crawl_payload(
+        status_code=429, redirected_status_code=429, response_headers={"Retry-After": "3600"}
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+    assert result.retry_after_s is not None
+    assert result.retry_after_s.value == 3600
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_retry_after_header_is_found_regardless_of_key_case() -> None:
+    """Crawl4AI passes response headers through as received."""
+    payload = _crawl_payload(
+        status_code=429, redirected_status_code=429, response_headers={"RETRY-AFTER": "120"}
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.retry_after_s is not None
+    assert result.retry_after_s.value == 120
 
 
 @respx.mock
@@ -118,6 +175,77 @@ async def test_redirect_into_forbidden_network_is_ssrf_blocked() -> None:
     result = await _fetcher().fetch(_request())
     assert isinstance(result, FetchFailure)
     assert result.kind == "ssrf_blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_public_redirect_into_blocked_body_is_ssrf_blocked() -> None:
+    """The rule keys on the FIRST code being a redirect plus the proxy body:
+    a publicly-resolvable final URL must not hide behind the final 403 and
+    come back as an ordinary block with a wrong retry advice."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=403,
+        html="URL blocked by internal policy",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_genuine_403_carrying_the_phrase_stays_blocked() -> None:
+    """A true 403 page that happens to contain 'URL blocked' is anti-bot,
+    not the egress proxy: no redirect happened."""
+    payload = _crawl_payload(
+        status_code=403,
+        redirected_status_code=403,
+        html="<html><body>We have blocked this URL for your safety</body></html>",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_redirect_to_blocked_body_beats_an_unresolvable_final_host() -> None:
+    """A name that only exists in the browser's network resolves to nothing
+    in the core; the proxy body still names the block (spike 02, 3)."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=403,
+        redirected_url="http://internal-only.test/hit",
+        html="URL blocked by internal policy",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_unresolvable_final_url_is_dns_not_network() -> None:
+    """The same state at the start URL is classified dns; the final-URL
+    re-check must not downgrade it to a retryable network error."""
+    payload = _crawl_payload(redirected_url="http://internal-only.test/page")
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "dns"
+    assert "internal-only.test" in result.message
 
 
 @respx.mock

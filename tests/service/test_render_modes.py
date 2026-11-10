@@ -169,6 +169,24 @@ def _browser_blocked() -> FetchFailure:
 
 
 @pytest.mark.asyncio
+async def test_an_empty_render_from_the_browser_is_not_needs_browser(
+    browser_harness: ServiceHarness,
+) -> None:
+    """The browser already rendered the page: needs_browser would tell the
+    agent to retry with the fetcher it just used (docs/03, 5)."""
+    browser_harness.browser_fetcher.script(
+        fetched_ok(normalized(_URL), b"<html><body><canvas></canvas></body></html>")
+    )
+    browser_harness.extractor.script(ExtractionFailure("empty", "no text after rendering"))
+
+    outcome = await browser_harness.service.fetch(service_request(_URL, render="browser"))
+
+    assert outcome.status == "error"
+    assert outcome.error_kind == "empty_render"
+    assert "no text after rendering" in (outcome.error_message or "")
+
+
+@pytest.mark.asyncio
 async def test_a_browser_failure_is_cached_for_browser_requests(
     browser_harness: ServiceHarness,
 ) -> None:
@@ -201,6 +219,31 @@ async def test_a_browser_failure_does_not_answer_a_static_retry(
     assert outcome.status == "ok"
     assert outcome.text == "static text"
     assert len(browser_harness.fetcher.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_static_success_overwrites_a_browser_failure_in_the_cache(
+    browser_harness: ServiceHarness,
+) -> None:
+    """One record per URL (docs/03, cache and render): a static success
+    replaces the browser failure, so the third, browser-mode request goes
+    back to the site that still blocks the browser - a deliberate
+    compromise over a composite cache key; this test pins the behavior."""
+    browser_harness.browser_fetcher.script(_browser_blocked())
+    first = await browser_harness.service.fetch(service_request(_URL, render="browser"))
+    browser_harness.fetcher.script(fetched_ok(normalized(_URL)))
+    browser_harness.extractor.script(
+        Extracted(text="static text", format="text", metadata=PageMetadata())
+    )
+    second = await browser_harness.service.fetch(service_request(_URL, render="static"))
+    browser_harness.browser_fetcher.script(_browser_blocked())
+    third = await browser_harness.service.fetch(service_request(_URL, render="browser"))
+
+    assert first.status == "blocked"
+    assert second.status == "ok"
+    assert third.status == "blocked"
+    assert third.from_cache is False
+    assert len(browser_harness.browser_fetcher.calls) == 2
 
 
 @pytest.mark.asyncio

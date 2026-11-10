@@ -22,6 +22,7 @@ type ErrorKind = Literal[
     "not_found",
     "timeout",
     "needs_browser",
+    "empty_render",
     "too_large",
     "dns",
     "network",
@@ -35,9 +36,10 @@ type ErrorKind = Literal[
     "content_changed",
 ]
 """Machine-readable kind of an expected failure (docs/03_mcp_interface.md, 5);
-``content_changed`` is journal-only (docs/01_requirements.md, 4.4): it marks
-a cache entry whose body changed on re-fetch and never surfaces as a tool
-error."""
+``empty_render`` means the browser already rendered the page and no text
+could be extracted from the render; ``content_changed`` is journal-only
+(docs/01_requirements.md, 4.4): it marks a cache entry whose body changed on
+re-fetch and never surfaces as a tool error."""
 
 type RenderMode = Literal["auto", "static", "browser"]
 """How the pipeline may obtain the page: static fetch, browser render, or auto."""

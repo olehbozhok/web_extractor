@@ -12,8 +12,6 @@ import asyncio
 import socket
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
-from email.utils import parsedate_to_datetime
 from ipaddress import IPv4Address, IPv6Address
 from urllib.parse import urljoin
 
@@ -31,16 +29,12 @@ from web_extractor.domain.types import (
     HTTP_TOO_MANY_REQUESTS,
     Clock,
     HttpStatus,
-    PositiveInt,
 )
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
-from web_extractor.fetchers.base import Resolver, port_failure
+from web_extractor.fetchers.base import Resolver, parse_retry_after, port_failure
 
 _CHUNK_SIZE = 65536
 """Streaming read size; keeps large responses under the size limit check."""
-
-_RETRY_AFTER_MAX_SECONDS = 86400
-"""Sanity cap for Retry-After so a hostile header cannot pin the cache long."""
 
 type AddressChecker = Callable[[IPv4Address | IPv6Address], SsrfViolation | None]
 """SSRF decision over one address; production passes domain.check_address."""
@@ -260,7 +254,7 @@ class HttpFetcher:
         """Map a non-success HTTP status onto a failure value, or None for 2xx."""
         if status.value in HTTP_BLOCKED_STATUSES:
             retry_after = (
-                _parse_retry_after(response.headers.get("retry-after"), self._clock.now())
+                parse_retry_after(response.headers.get("retry-after"), self._clock.now())
                 if status.value == HTTP_TOO_MANY_REQUESTS
                 else None
             )
@@ -340,23 +334,3 @@ def _redirect_target(url: NormalizedUrl, response: httpx.Response) -> Normalized
         msg = f"{url} redirected to invalid target {location!r}: {target.message}"
         return FetchFailure("redirect_error", msg, final_url=url)
     return target
-
-
-def _parse_retry_after(raw: str | None, now: datetime) -> PositiveInt | None:
-    """Retry-After as seconds (integer form, then HTTP-date form)."""
-    if raw is None:
-        return None
-    stripped = raw.strip()
-    if stripped.isdigit():
-        seconds = int(stripped)
-    else:
-        try:
-            when = parsedate_to_datetime(stripped)
-        except (TypeError, ValueError):
-            return None
-        if when.tzinfo is None:
-            return None
-        seconds = int((when - now).total_seconds())
-    if seconds <= 0 or seconds > _RETRY_AFTER_MAX_SECONDS:
-        return None
-    return PositiveInt(seconds)

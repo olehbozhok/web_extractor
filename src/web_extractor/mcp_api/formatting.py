@@ -29,6 +29,7 @@ _ADVICE: dict[ErrorKind, str] = {
     "not_found": "Check the URL, look for an archived copy or another source.",
     "timeout": "Retry once.",
     "needs_browser": "The page has no extractable text without JavaScript.",
+    "empty_render": "The page rendered but has no extractable text; use another source.",
     "too_large": "The page is too large for text extraction; use another source.",
     "dns": "The host name does not resolve; check the spelling of the domain.",
     "network": "Connection failed; retry once, then try another source.",
