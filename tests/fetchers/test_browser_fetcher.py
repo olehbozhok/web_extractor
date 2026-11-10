@@ -179,6 +179,77 @@ async def test_redirect_into_forbidden_network_is_ssrf_blocked() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_public_redirect_into_blocked_body_is_ssrf_blocked() -> None:
+    """The rule keys on the FIRST code being a redirect plus the proxy body:
+    a publicly-resolvable final URL must not hide behind the final 403 and
+    come back as an ordinary block with a wrong retry advice."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=403,
+        html="URL blocked by internal policy",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_genuine_403_carrying_the_phrase_stays_blocked() -> None:
+    """A true 403 page that happens to contain 'URL blocked' is anti-bot,
+    not the egress proxy: no redirect happened."""
+    payload = _crawl_payload(
+        status_code=403,
+        redirected_status_code=403,
+        html="<html><body>We have blocked this URL for your safety</body></html>",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_redirect_to_blocked_body_beats_an_unresolvable_final_host() -> None:
+    """A name that only exists in the browser's network resolves to nothing
+    in the core; the proxy body still names the block (spike 02, 3)."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=403,
+        redirected_url="http://internal-only.test/hit",
+        html="URL blocked by internal policy",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_unresolvable_final_url_is_dns_not_network() -> None:
+    """The same state at the start URL is classified dns; the final-URL
+    re-check must not downgrade it to a retryable network error."""
+    payload = _crawl_payload(redirected_url="http://internal-only.test/page")
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "dns"
+    assert "internal-only.test" in result.message
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_private_final_url_is_rechecked() -> None:
     """The core re-resolves the final URL and applies the SSRF rules."""
     payload = _crawl_payload(redirected_url="http://169.254.169.254/latest/meta-data/")

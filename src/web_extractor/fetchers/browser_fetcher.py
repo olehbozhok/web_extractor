@@ -179,11 +179,7 @@ class BrowserFetcher:
         if answer is None:
             msg = f"{_BROWSER_UNAVAILABLE_NOTE}: malformed response for {request.url}"
             return FetchFailure("browser_unavailable", msg, final_url=request.url)
-        try:
-            return await self._to_result(request, answer)
-        except OSError as exc:
-            msg = f"final URL of {request.url} could not be resolved: {exc}"
-            return FetchFailure("network", msg, final_url=request.url)
+        return await self._to_result(request, answer)
 
     async def _to_result(self, request: FetchRequest, answer: _CrawlAnswer) -> FetchResult:
         """Map the crawl answer onto domain types, SSRF-checking the final URL."""
@@ -195,7 +191,17 @@ class BrowserFetcher:
         bad_port = port_failure(parsed, self._config.allowed_ports)
         if bad_port is not None:
             return bad_port
-        violation = await self._check_host(parsed)
+        try:
+            violation = await self._check_host(parsed)
+        except OSError as exc:
+            # The final host may exist only in the browser's network (spike 02,
+            # 3); the proxy body then names the block more truthfully than the
+            # resolution failure would.
+            if _redirect_into_blocked_network(answer.status_code, answer.html):
+                msg = f"{request.url} was redirected by the browser into a forbidden network"
+                return FetchFailure("ssrf_blocked", msg, final_url=parsed)
+            msg = f"final URL of {request.url} did not resolve: {exc}"
+            return FetchFailure("dns", msg, final_url=parsed)
         if violation is not None:
             msg = f"{parsed} resolves to forbidden address (rule: {violation.rule})"
             return FetchFailure("ssrf_blocked", msg, final_url=parsed)
@@ -211,7 +217,7 @@ class BrowserFetcher:
             msg = f"browser could not load {request.url}: {reason}"
             return FetchFailure("network", msg, final_url=parsed)
         status = HttpStatus(code)
-        kind = _failure_kind_for(code, answer.html)
+        kind = _failure_kind_for(answer.status_code, code, answer.html)
         if kind is not None:
             msg = f"{request.url} returned {code} through the browser ({kind})"
             retry_after = (
@@ -243,13 +249,10 @@ class BrowserFetcher:
     async def _check_host(self, url: NormalizedUrl) -> SsrfViolation | None:
         """Resolve the URL's host once and apply the SSRF rules to every address.
 
-        Resolution failures propagate as ``OSError`` with the URL in the text.
+        Resolution failures propagate as ``OSError`` from the resolver; the
+        callers name the URL in their own messages.
         """
-        try:
-            addresses = await self._resolver.resolve(url.host)
-        except OSError as exc:
-            msg = f"{url} did not resolve: {exc}"
-            raise OSError(msg) from exc
+        addresses = await self._resolver.resolve(url.host)
         for address in addresses:
             violation = check_address(address)
             if violation is not None:
@@ -275,19 +278,30 @@ def _navigation_error(error_message: str | None) -> str:
     return error_message.strip().splitlines()[0][:_MAX_ERROR_EXCERPT]
 
 
-def _failure_kind_for(code: int, html: str) -> FetchFailureKind | None:
-    """Decide the failure kind from the final status code and body.
+def _redirect_into_blocked_network(first_code: int | None, html: str) -> bool:
+    """The egress proxy's signature of a redirect into a forbidden network
+    (docs/spikes/02, 6): the FIRST status is a redirect and the body is its
+    ``URL blocked`` page. The final code alone - a genuine 403 carrying the
+    same phrase - is an ordinary block, not a forbidden network."""
+    return first_code in HTTP_REDIRECT_CODES and _SSRF_REJECTION_MARKER in html[:200]
 
-    A redirect into a forbidden network shows up as 302 with a final 403
-    and the egress proxy's ``URL blocked`` body (docs/spikes/02, 6).
+
+def _failure_kind_for(
+    first_code: int | None, final_code: int, html: str
+) -> FetchFailureKind | None:
+    """Decide the failure kind from the first and final status codes and body.
+
+    A redirect into a forbidden network shows up as a redirect status with
+    the egress proxy's ``URL blocked`` body (docs/spikes/02, 6): the final
+    code alone (403) cannot be told apart from an anti-bot block.
     """
-    if code in HTTP_REDIRECT_CODES and "URL blocked" in html[:200]:
+    if _redirect_into_blocked_network(first_code, html):
         return "ssrf_blocked"
-    if code in HTTP_BLOCKED_STATUSES:
+    if final_code in HTTP_BLOCKED_STATUSES:
         return "blocked"
-    if code in HTTP_NOT_FOUND_STATUSES:
+    if final_code in HTTP_NOT_FOUND_STATUSES:
         return "not_found"
-    if code < HTTP_OK_MIN or code > HTTP_OK_MAX:
+    if final_code < HTTP_OK_MIN or final_code > HTTP_OK_MAX:
         return "server_error"
     return None
 
