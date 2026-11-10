@@ -169,6 +169,24 @@ def _browser_blocked() -> FetchFailure:
 
 
 @pytest.mark.asyncio
+async def test_an_empty_render_from_the_browser_is_not_needs_browser(
+    browser_harness: ServiceHarness,
+) -> None:
+    """The browser already rendered the page: needs_browser would tell the
+    agent to retry with the fetcher it just used (docs/03, 5)."""
+    browser_harness.browser_fetcher.script(
+        fetched_ok(normalized(_URL), b"<html><body><canvas></canvas></body></html>")
+    )
+    browser_harness.extractor.script(ExtractionFailure("empty", "no text after rendering"))
+
+    outcome = await browser_harness.service.fetch(service_request(_URL, render="browser"))
+
+    assert outcome.status == "error"
+    assert outcome.error_kind == "empty_render"
+    assert "no text after rendering" in (outcome.error_message or "")
+
+
+@pytest.mark.asyncio
 async def test_a_browser_failure_is_cached_for_browser_requests(
     browser_harness: ServiceHarness,
 ) -> None:

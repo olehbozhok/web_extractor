@@ -385,8 +385,8 @@ class FetchService:
             text = extract_result.text
             metadata_json = json.dumps(asdict(extract_result.metadata))
         else:
-            status = _status_for_extraction(extract_result.kind)
-            error_kind = _error_kind_for_extraction(extract_result.kind)
+            status = _status_for_extraction(extract_result.kind, fetched.fetcher)
+            error_kind = _error_kind_for_extraction(extract_result.kind, fetched.fetcher)
             error_message = extract_result.message
             text = None
             metadata_json = "{}"
@@ -549,18 +549,25 @@ def _error_kind_for_failure(kind: FetchFailureKind) -> ErrorKind:
     return _FAILURE_ERROR_KINDS[kind]
 
 
-def _status_for_extraction(kind: ExtractionFailureKind) -> Status:
-    """Empty or JS-only pages mean the static fetch was not enough."""
+def _status_for_extraction(kind: ExtractionFailureKind, fetcher: FetcherName) -> Status:
+    """Map an extraction failure onto the response status.
+
+    After a static fetch an empty or JS-only page means a browser might
+    help (``needs_browser``). After a browser render nothing is left to
+    try, so the same failure is a plain ``error``: telling the agent to
+    use the browser it just used would only loop.
+    """
     match kind:
         case "needs_js" | "empty":
-            return "needs_browser"
+            return "needs_browser" if fetcher == "http" else "error"
         case "parse_error":
             return "error"
 
 
-def _error_kind_for_extraction(kind: ExtractionFailureKind) -> ErrorKind:
+def _error_kind_for_extraction(kind: ExtractionFailureKind, fetcher: FetcherName) -> ErrorKind:
+    """Map an extraction failure onto the agent-visible error kind."""
     match kind:
         case "needs_js" | "empty":
-            return "needs_browser"
+            return "needs_browser" if fetcher == "http" else "empty_render"
         case "parse_error":
             return "internal"
