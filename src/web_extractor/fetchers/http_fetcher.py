@@ -34,7 +34,7 @@ from web_extractor.domain.types import (
     PositiveInt,
 )
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
-from web_extractor.fetchers.base import Resolver
+from web_extractor.fetchers.base import Resolver, port_failure
 
 _CHUNK_SIZE = 65536
 """Streaming read size; keeps large responses under the size limit check."""
@@ -152,9 +152,9 @@ class HttpFetcher:
 
     async def fetch(self, request: FetchRequest) -> FetchResult:
         """Fetch ``request.url``; every expected failure comes back as a value."""
-        port_failure = _port_failure(request.url, self._config.allowed_ports)
-        if port_failure is not None:
-            return port_failure
+        bad_port = port_failure(request.url, self._config.allowed_ports)
+        if bad_port is not None:
+            return bad_port
         backend = PinnedNetworkBackend()
         client = httpx.AsyncClient(
             transport=PinnedTransport(backend),
@@ -229,9 +229,9 @@ class HttpFetcher:
         target = _redirect_target(url, response)
         if isinstance(target, FetchFailure):
             return target
-        port_failure = _port_failure(target, self._config.allowed_ports)
-        if port_failure is not None:
-            return port_failure
+        bad_port = port_failure(target, self._config.allowed_ports)
+        if bad_port is not None:
+            return bad_port
         if len(chain) >= self._config.max_redirects:
             msg = f"more than {self._config.max_redirects} redirects from {start_url}"
             return FetchFailure("redirect_error", msg, final_url=url)
@@ -327,14 +327,6 @@ class HttpFetcher:
             fetcher="http",
             redirect_chain=chain,
         )
-
-
-def _port_failure(url: NormalizedUrl, allowed_ports: tuple[int, ...]) -> FetchFailure | None:
-    """Reject ports outside the configured allow-list (SSRF section 7)."""
-    if url.port is not None and url.port not in allowed_ports:
-        msg = f"port {url.port} of {url} is not in the allowed list {allowed_ports}"
-        return FetchFailure("ssrf_blocked", msg, final_url=url)
-    return None
 
 
 def _redirect_target(url: NormalizedUrl, response: httpx.Response) -> NormalizedUrl | FetchFailure:

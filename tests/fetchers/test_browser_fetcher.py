@@ -28,6 +28,7 @@ def _config() -> BrowserFetcherConfig:
         token="stub-token-for-tests",
         page_timeout_ms=15000,
         max_concurrent=2,
+        allowed_ports=(80, 443, 8080, 8443),
     )
 
 
@@ -148,6 +149,80 @@ async def test_malformed_payload_is_browser_unavailable() -> None:
     result = await _fetcher().fetch(_request())
     assert isinstance(result, FetchFailure)
     assert result.kind == "browser_unavailable"
+
+
+def _request_for(url: str) -> FetchRequest:
+    parsed = parse_normalized_url(url)
+    assert isinstance(parsed, NormalizedUrl)
+    return FetchRequest(url=parsed, fresh=False, render="browser", agent=AgentId("tester"))
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_disallowed_port_is_ssrf_blocked_before_the_browser() -> None:
+    """The browser path enforces the same port allow-list as the static one."""
+    route = respx.post("http://crawl4ai.test:11235/crawl")
+    result = await _fetcher().fetch(_request_for("https://site.test:6379/"))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+    assert "6379" in result.message
+    assert not route.called
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_private_start_url_is_ssrf_blocked_before_the_browser() -> None:
+    route = respx.post("http://crawl4ai.test:11235/crawl")
+    result = await _fetcher().fetch(_request_for("http://169.254.169.254/latest/meta-data/"))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+    assert not route.called
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_unresolvable_start_host_is_dns_before_the_browser() -> None:
+    """Crawl4AI answers 400 'URL blocked' for such hosts; the core must say dns."""
+    route = respx.post("http://crawl4ai.test:11235/crawl")
+    result = await _fetcher().fetch(_request_for("https://no-such-host.test/"))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "dns"
+    assert "no-such-host.test" in result.message
+    assert not route.called
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_crawl4ai_url_blocked_400_is_ssrf_blocked() -> None:
+    """Crawl4AI's own SSRF guard (e.g. after DNS rebinding) is not an outage."""
+    respx.post("http://crawl4ai.test:11235/crawl").mock(
+        return_value=Response(400, json={"detail": "URL blocked (SSRF protection): URL blocked"})
+    )
+    result = await _fetcher().fetch(_request())
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "ssrf_blocked"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_failed_navigation_is_network_with_browser_error_code() -> None:
+    """A PDF or download URL fails navigation in Chromium (verified on 0.9.5)."""
+    payload = _crawl_payload(
+        html="",
+        status_code=None,
+        redirected_status_code=None,
+        redirected_url=None,
+        error_message=(
+            "Unexpected error in _crawl_web at line 779:\nError: Failed on navigating "
+            "ACS-GOTO:\nPage.goto: net::ERR_FAILED at https://site.test/page\nCall log:"
+        ),
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+    result = await _fetcher().fetch(_request())
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "network"
+    assert "net::ERR_FAILED" in result.message
+    assert "Call log" not in result.message
 
 
 @respx.mock
