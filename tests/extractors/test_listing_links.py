@@ -285,3 +285,16 @@ def test_whitespace_only_href_has_no_destination_and_is_dropped() -> None:
     links = extract_listing_links(html, _PAGE)
 
     assert [item.name for item in links] == ["Real headline"]
+
+
+def test_link_url_with_unicode_line_separator_is_dropped() -> None:
+    """U+0085, U+2028 and U+2029 are line ends for ``str.splitlines()`` and
+    many readers, and the invariant must be uniform: a URL carries no
+    character a reader can take for an end of line. (Forging the fence
+    markers with them is impossible - the markers contain plain spaces -
+    but the rule is the same for any line-end character.)"""
+    html = _page(_anchor("/a\u2028b", "Separator"), _anchor("/ok", "Real headline"))
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == ["Real headline"]

@@ -51,14 +51,23 @@ banner/contentinfo)."""
 _BOILERPLATE_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA roles marking the same boilerplate on tag-less containers."""
 
-_URL_FORBIDDEN_CHARACTERS = frozenset(chr(code) for code in range(0x21)) | {"\x7f"}
-"""Whitespace and control characters: any of them inside a URL rejects the
-link. ``urljoin`` preserves a trailing space of an href (CPython strips only
-leading C0-and-space) and raw newlines taken from numeric references in an
-href, and a link printed into the fenced listing section could forge its
-markers or break the "link is the text after the last `` — ``" reading rule.
-A URL with such characters inside is malformed for HTTP anyway, and the field
-is best-effort by design. At the edges of an href the same characters are not
+_URL_FORBIDDEN_CHARACTERS = frozenset(chr(code) for code in range(0x21)) | {
+    "\x7f",
+    "\u0085",
+    "\u2028",
+    "\u2029",
+}
+"""Whitespace and control characters, plus the Unicode line separators
+U+0085 (NEL), U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR): any
+of them inside a URL rejects the link, so a URL carries no character a
+reader can take for an end of line (``str.splitlines()`` and many readers
+treat the three separators as line ends, like a newline). ``urljoin`` preserves
+a trailing space of an href (CPython strips only leading C0-and-space) and
+raw newlines taken from numeric references in an href, and a link printed
+into the fenced listing section could forge its markers or break the
+"link is the text after the last `` — ``" reading rule. A URL with such
+characters inside is malformed for HTTP anyway, and the field is
+best-effort by design. At the edges of an href the same characters are not
 a rejection case: they are trimmed off before resolution, as browsers trim
 both edges (see ``_URL_EDGE_TRIM_CHARACTERS``)."""
 
