@@ -274,10 +274,10 @@ async def test_ok_html_outcome_carries_listing_links(harness: ServiceHarness) ->
     outcome = await harness.service.fetch(service_request(_URL))
 
     assert outcome.status == "ok"
-    assert outcome.listing_links == [
+    assert outcome.listing_links == (
         LinkItem(name="First headline", link="https://site.test/a"),
         LinkItem(name="Second headline", link="https://site.test/b"),
-    ]
+    )
 
 
 @pytest.mark.asyncio
@@ -288,7 +288,7 @@ async def test_html_without_anchors_yields_empty_listing_links(harness: ServiceH
     outcome = await harness.service.fetch(service_request(_URL))
 
     assert outcome.status == "ok"
-    assert outcome.listing_links == []
+    assert outcome.listing_links == ()
 
 
 @pytest.mark.asyncio

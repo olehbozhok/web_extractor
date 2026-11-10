@@ -66,7 +66,7 @@ class FetchOutcome:
     """What the body is (sniffed), None when there is no body (fetch errors)."""
     content_type: str | None = None
     """The media type the server declared; may disagree with ``document``."""
-    listing_links: list[LinkItem] | None = None
+    listing_links: tuple[LinkItem, ...] | None = None
     """Same-site anchor links derived from the raw HTML; present (possibly
     empty) only for ``ok`` html pages, None otherwise. Computed on every
     outcome build, never persisted to the cache."""

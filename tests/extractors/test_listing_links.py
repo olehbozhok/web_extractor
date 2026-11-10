@@ -22,10 +22,10 @@ def test_document_order_and_whitespace_normalization() -> None:
 
     links = extract_listing_links(html, _PAGE)
 
-    assert links == [
+    assert links == (
         LinkItem(name="News about robots today", link="https://news.test/first"),
         LinkItem(name="Sports section", link="https://news.test/second"),
-    ]
+    )
 
 
 def test_relative_hrefs_resolve_against_final_url() -> None:
@@ -99,10 +99,10 @@ def test_duplicates_keep_the_first_occurrence() -> None:
 
     links = extract_listing_links(html, _PAGE)
 
-    assert links == [
+    assert links == (
         LinkItem(name="Same headline", link="https://news.test/dup"),
         LinkItem(name="Same headline", link="https://news.test/other"),
-    ]
+    )
 
 
 def test_result_is_capped_in_document_order() -> None:
@@ -145,8 +145,8 @@ def test_aria_navigation_roles_are_excluded_too() -> None:
 
 
 def test_broken_html_yields_no_links() -> None:
-    assert extract_listing_links(b"", _PAGE) == []
-    assert extract_listing_links(b"\x00\x01\x02\xff", _PAGE) == []
+    assert extract_listing_links(b"", _PAGE) == ()
+    assert extract_listing_links(b"\x00\x01\x02\xff", _PAGE) == ()
 
 
 def test_utf8_anchor_text_survives_without_a_declared_charset() -> None:
@@ -155,7 +155,7 @@ def test_utf8_anchor_text_survives_without_a_declared_charset() -> None:
 
     links = extract_listing_links(html, _PAGE)
 
-    assert links == [LinkItem(name="Новини \U0001f996 дня", link="https://news.test/news")]
+    assert links == (LinkItem(name="Новини \U0001f996 дня", link="https://news.test/news"),)
 
 
 def test_non_utf8_page_still_parses_through_the_declared_charset() -> None:
@@ -167,4 +167,4 @@ def test_non_utf8_page_still_parses_through_the_declared_charset() -> None:
 
     links = extract_listing_links(html, _PAGE)
 
-    assert links == [LinkItem(name="Новини", link="https://news.test/news")]
+    assert links == (LinkItem(name="Новини", link="https://news.test/news"),)

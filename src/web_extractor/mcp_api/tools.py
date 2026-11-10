@@ -672,7 +672,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         document=outcome.document,
         content_type=outcome.content_type if args.detail == "detailed" else None,
         content_quality=quality,
-        listing_links=(tuple(outcome.listing_links) if outcome.listing_links is not None else None),
+        listing_links=outcome.listing_links,
     )
     return _text_response(meta, "\n".join(lines))
 

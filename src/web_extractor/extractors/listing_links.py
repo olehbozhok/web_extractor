@@ -37,7 +37,7 @@ _BOILERPLATE_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA roles marking the same boilerplate on tag-less containers."""
 
 
-def extract_listing_links(html: bytes, final_url: str) -> list[LinkItem]:
+def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
     """Collect same-site anchor links from ``html``, in document order.
 
     ``final_url`` resolves relative hrefs and defines the site: only anchors
@@ -49,17 +49,17 @@ def extract_listing_links(html: bytes, final_url: str) -> list[LinkItem]:
     whitespace-normalized text is 3..200 characters long and carries at least
     one letter (which filters out dates, counters and icons). Duplicates of
     ``(name, link)`` keep their first occurrence; at most ``LISTING_LINKS_MAX``
-    links are returned. Unparseable HTML yields ``[]``.
+    links are returned. Unparseable HTML yields ``()``.
     """
     try:
         tree = fromstring(_as_parser_input(html))
     except etree.LxmlError:
         # The recovering parser still rejects garbage (e.g. an empty or
-        # binary body); an empty array is the documented best-effort value.
-        return []
+        # binary body); an empty tuple is the documented best-effort value.
+        return ()
     base_host = _host_of(final_url)
     if base_host is None:
-        return []
+        return ()
     links: list[LinkItem] = []
     seen: set[tuple[str, str]] = set()
     for anchor in tree.iter("a"):
@@ -86,7 +86,7 @@ def extract_listing_links(html: bytes, final_url: str) -> list[LinkItem]:
         links.append(LinkItem(name=name, link=link))
         if len(links) == LISTING_LINKS_MAX:
             break
-    return links
+    return tuple(links)
 
 
 def _in_boilerplate(anchor: etree._Element) -> bool:
