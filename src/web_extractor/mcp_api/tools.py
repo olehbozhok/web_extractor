@@ -272,10 +272,14 @@ def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> Call
     Strings are passed through as they are: page text and anchor texts reach
     the response unchanged, so a quote shown by fetch_page is exactly what
     find_in_page searches (docs/03, the no-sanitization decision).
+
+    ``None`` fields are omitted (recursively, by ``exclude_none``): an absent
+    key means what ``null`` meant before - the page does not have it. No
+    ``outputSchema`` is advertised, so key absence conforms to the spec.
     """
     return CallToolResult(
         content=[TextContent(type="text", text=body)],
-        structured_content=meta.model_dump(mode="json"),
+        structured_content=meta.model_dump(mode="json", exclude_none=True),
         is_error=False,
     )
 
@@ -297,7 +301,7 @@ def _error_response(
     )
     return CallToolResult(
         content=[TextContent(type="text", text=error_text(kind, message, fetcher))],
-        structured_content=meta.model_dump(mode="json"),
+        structured_content=meta.model_dump(mode="json", exclude_none=True),
         is_error=True,
     )
 
