@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from web_extractor.domain.content_type import DocumentKind
 from web_extractor.domain.extract import PageMetadata
+from web_extractor.domain.listing_links import LinkItem
 from web_extractor.domain.types import (
     AgentId,
     DetailLevel,
@@ -65,3 +66,7 @@ class FetchOutcome:
     """What the body is (sniffed), None when there is no body (fetch errors)."""
     content_type: str | None = None
     """The media type the server declared; may disagree with ``document``."""
+    listing_links: list[LinkItem] | None = None
+    """Same-site anchor links derived from the raw HTML; present (possibly
+    empty) only for ``ok`` html pages, None otherwise. Computed on every
+    outcome build, never persisted to the cache."""

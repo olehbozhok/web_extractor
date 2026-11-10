@@ -13,6 +13,11 @@ from web_extractor.domain.types import ErrorKind, FetcherName, RenderMode
 _BEGIN_MARKER = "--- BEGIN UNTRUSTED PAGE CONTENT ---"
 _END_MARKER = "--- END UNTRUSTED PAGE CONTENT ---"
 
+_MAX_BMP_CODEPOINT = 0xFFFF
+"""Above this code point a character is beyond the Basic Multilingual Plane."""
+
+_REPLACEMENT_CHARACTER = "�"
+
 _ADVICE: dict[ErrorKind, str] = {
     "invalid_argument": "Fix the named parameter and call again.",
     "ssrf_blocked": "The address is private or forbidden by design; do not retry it.",
@@ -100,3 +105,30 @@ def chunk_line(start: int, end: int, total: int) -> str:
 def cursor_line(cursor_id: str) -> str:
     """The ``cursor:`` header line with the continuation hint."""
     return f"cursor: {cursor_id}   # call read_more with this cursor for the next chunk"
+
+
+def sanitize_non_bmp(value: str) -> str:
+    """Replace every code point beyond the Basic Multilingual Plane with U+FFFD.
+
+    ``listing_links`` carries arbitrary anchor texts from the web into tool
+    responses for the first time, and MCP client agents crash on astral
+    characters (docs/01, docs/02); the replacement character marks where one
+    was removed. ASCII strings, the common case, are returned as-is.
+    """
+    if value.isascii():
+        return value
+    return "".join(
+        character if ord(character) <= _MAX_BMP_CODEPOINT else _REPLACEMENT_CHARACTER
+        for character in value
+    )
+
+
+def sanitize_json_value(value: object) -> object:
+    """``sanitize_non_bmp`` applied to every string of a JSON-shaped value."""
+    if isinstance(value, str):
+        return sanitize_non_bmp(value)
+    if isinstance(value, list | tuple):
+        return [sanitize_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): sanitize_json_value(item) for key, item in value.items()}
+    return value

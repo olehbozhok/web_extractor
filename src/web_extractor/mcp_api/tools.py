@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from web_extractor.domain.content_quality import ContentQuality, assess_content
 from web_extractor.domain.content_type import DocumentKind
 from web_extractor.domain.extract import PageMetadata
+from web_extractor.domain.listing_links import LinkItem
 from web_extractor.domain.ttl import parse_iso_utc
 from web_extractor.domain.types import (
     AgentId,
@@ -39,6 +40,8 @@ from web_extractor.mcp_api.formatting import (
     error_text,
     fenced_body,
     retry_render,
+    sanitize_json_value,
+    sanitize_non_bmp,
 )
 from web_extractor.service.cursor_service import (
     CursorService,
@@ -178,6 +181,8 @@ class UrlRow(BaseModel):
     error_kind: str | None = None
     retry_render: RenderMode | None = None
     """For a failed row: the render mode worth one retry, if switching may help."""
+    listing_links_count: int | None = None
+    """Same-site anchor links found in the html body; None when there is no html body."""
 
 
 class PageMeta(BaseModel):
@@ -209,6 +214,14 @@ class PageMeta(BaseModel):
     content_type: str | None = None
     """Only in ``detail=detailed`` responses."""
     content_quality: ContentQuality
+    listing_links: tuple[LinkItem, ...] | None = None
+    """Same-site anchor links from the raw HTML, on the first chunk only.
+
+    None when the body is not an html page. A non-None value also signals in
+    the structured channel that the text is a fragment of the page's real
+    content: on index pages the extracted main text is an arbitrary piece
+    while the page's content is the link list reported here (docs/03).
+    """
 
 
 class FindMeta(BaseModel):
@@ -255,10 +268,15 @@ class ErrorMeta(BaseModel):
 
 
 def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> CallToolResult:
-    """A successful response: text block plus metadata-only structured part."""
+    """A successful response: text block plus metadata-only structured part.
+
+    Every string leaving the tool is sanitized here: astral code points
+    (emoji and the like in anchor texts and page bodies) crash client agents
+    and become U+FFFD (docs/03).
+    """
     return CallToolResult(
-        content=[TextContent(type="text", text=body)],
-        structured_content=meta.model_dump(mode="json"),
+        content=[TextContent(type="text", text=sanitize_non_bmp(body))],
+        structured_content=sanitize_json_value(meta.model_dump(mode="json")),
         is_error=False,
     )
 
@@ -279,8 +297,10 @@ def _error_response(
         retry_render=retry_render(kind, fetcher),
     )
     return CallToolResult(
-        content=[TextContent(type="text", text=error_text(kind, message, fetcher))],
-        structured_content=meta.model_dump(mode="json"),
+        content=[
+            TextContent(type="text", text=sanitize_non_bmp(error_text(kind, message, fetcher)))
+        ],
+        structured_content=sanitize_json_value(meta.model_dump(mode="json")),
         is_error=True,
     )
 
@@ -372,8 +392,16 @@ def _source_line(outcome: FetchOutcome, now: datetime) -> str:
     return f"source: network, {outcome.fetcher or 'http'}"
 
 
-def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str]:
-    """Common response header lines for a successful outcome."""
+def _header_lines(
+    outcome: FetchOutcome, detail: str, now: datetime, *, listing_links_count: int | None = None
+) -> list[str]:
+    """Common response header lines for a successful outcome.
+
+    ``listing_links_count`` is passed only where the array itself is
+    reported (fetch_page first chunk): its presence in the text channel is
+    the signal that the extracted text is a fragment, e.g. of an index page
+    whose real content is the link list.
+    """
     lines = [f"status: {outcome.status}"]
     url_line = f"url: {outcome.url}"
     if outcome.final_url is not None and outcome.final_url != outcome.url:
@@ -386,6 +414,8 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
         lines.append(f"published: {published}")
     if outcome.document is not None:
         lines.append(f"document: {outcome.document}")
+    if listing_links_count is not None:
+        lines.append(f"listing_links: {listing_links_count}")
     lines.append(_source_line(outcome, now))
     if detail == "detailed":
         lines.append(f"http_status: {outcome.http_status}")
@@ -604,7 +634,14 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         if truncated
         else None
     )
-    lines = _header_lines(outcome, args.detail, deps.clock.now())
+    lines = _header_lines(
+        outcome,
+        args.detail,
+        deps.clock.now(),
+        listing_links_count=(
+            len(outcome.listing_links) if outcome.listing_links is not None else None
+        ),
+    )
     quality = assess_content(text)
     lines.append(f"content: {quality}")
     lines.append(f"text_version: {text_version_short(text)} ({shown_format})")
@@ -635,6 +672,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         document=outcome.document,
         content_type=outcome.content_type if args.detail == "detailed" else None,
         content_quality=quality,
+        listing_links=(tuple(outcome.listing_links) if outcome.listing_links is not None else None),
     )
     return _text_response(meta, "\n".join(lines))
 
@@ -930,6 +968,9 @@ def _check_row_meta(outcome: FetchOutcome) -> UrlRow:
         error_kind=outcome.error_kind,
         retry_render=(
             retry_render(_kind_of(outcome), outcome.fetcher) if outcome.status != "ok" else None
+        ),
+        listing_links_count=(
+            len(outcome.listing_links) if outcome.listing_links is not None else None
         ),
     )
 
