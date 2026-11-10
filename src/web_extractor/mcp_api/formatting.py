@@ -19,6 +19,8 @@ _END_MARKER = "--- END UNTRUSTED PAGE CONTENT ---"
 _BEGIN_LINKS_MARKER = "--- BEGIN UNTRUSTED LISTING LINKS ---"
 _END_LINKS_MARKER = "--- END UNTRUSTED LISTING LINKS ---"
 
+_FENCE_MARKERS = (_BEGIN_MARKER, _END_MARKER, _BEGIN_LINKS_MARKER, _END_LINKS_MARKER)
+
 _ADVICE: dict[ErrorKind, str] = {
     "invalid_argument": "Fix the named parameter and call again.",
     "ssrf_blocked": "The address is private or forbidden by design; do not retry it.",
@@ -104,11 +106,28 @@ def fenced_listing_links(links: Sequence[LinkItem]) -> str:
     One link per line as ``- name — link``: the fence is presented as
     literal text (no markdown rendering, like the body), so link syntax
     would add nothing while forcing bracket escaping of arbitrary anchor
-    names. The URL is the text after the last `` — `` of a line. Empty
-    input never reaches here: no links, no section (docs/03).
+    names. An anchor name never carries a fence-marker literal: it is
+    stripped when the line is built, so a name cannot forge the section's
+    own markers inside it (the name may come out mangled). The URL is the
+    text after the last `` — `` of a line. Empty input never reaches
+    here: no links, no section (docs/03).
     """
-    lines = [f"- {item.name} — {item.link}" for item in links]
+    lines = [f"- {_without_fence_markers(item.name)} — {item.link}" for item in links]
     return f"{_BEGIN_LINKS_MARKER}\n" + "\n".join(lines) + f"\n{_END_LINKS_MARKER}"
+
+
+def _without_fence_markers(name: str) -> str:
+    """Strip fence-marker literals from an anchor name, then re-normalize spaces.
+
+    Defense-in-depth: the name is a single whitespace-normalized line, so a
+    forged marker can never start a line and a line-start-scanning client
+    cannot be fooled; stripping the literals covers clients that scan the
+    raw text too. Re-joining on whitespace cleans up the gap the strip
+    leaves and is a no-op for already-normalized names.
+    """
+    for marker in _FENCE_MARKERS:
+        name = name.replace(marker, "")
+    return " ".join(name.split())
 
 
 def chunk_line(start: int, end: int, total: int) -> str:
