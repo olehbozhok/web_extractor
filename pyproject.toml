@@ -10,6 +10,7 @@ dependencies = [
     "fastapi",
     "httpx",
     "jinja2",
+    "lxml>=6.1.3",
     "mcp",
     "pydantic",
     "pydantic-settings",
@@ -21,6 +22,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "lxml-stubs>=0.5.1",
     "mypy",
     "pytest",
     "pytest-asyncio",

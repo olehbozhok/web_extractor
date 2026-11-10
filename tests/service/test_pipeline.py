@@ -8,6 +8,7 @@ from tests.service.conftest import ServiceHarness, service_request
 from tests.service.service_helpers import extracted, fetched_blocked, fetched_ok, normalized, sha_of
 from web_extractor.domain.extract import Extracted, ExtractionFailure, PageMetadata
 from web_extractor.domain.fetch import FetchFailure
+from web_extractor.domain.listing_links import LinkItem
 from web_extractor.domain.ttl import parse_iso_utc
 from web_extractor.domain.types import HttpStatus, PositiveInt
 from web_extractor.storage.cache_repository import CacheRepository
@@ -15,6 +16,10 @@ from web_extractor.storage.cache_repository import CacheRepository
 _URL = "https://site.test/page"
 _BODY_1 = b"<html><body>v1</body></html>"
 _BODY_2 = b"<html><body>v2</body></html>"
+_LISTING_BODY = (
+    b'<html><body><a href="/a">First headline</a><a href="/b">Second headline</a></body></html>'
+)
+_PLAIN_BODY = b"<html><body><p>Just a paragraph, no anchors here.</p></body></html>"
 
 
 @pytest.mark.asyncio
@@ -259,3 +264,50 @@ async def test_concurrent_requests_for_different_formats_each_get_their_own(
         "**markdown text**",
         "markdown",
     )
+
+
+@pytest.mark.asyncio
+async def test_ok_html_outcome_carries_listing_links(harness: ServiceHarness) -> None:
+    harness.fetcher.script(fetched_ok(normalized(_URL), _LISTING_BODY))
+    harness.extractor.script(extracted())
+
+    outcome = await harness.service.fetch(service_request(_URL))
+
+    assert outcome.status == "ok"
+    assert outcome.listing_links == (
+        LinkItem(name="First headline", link="https://site.test/a"),
+        LinkItem(name="Second headline", link="https://site.test/b"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_html_without_anchors_yields_empty_listing_links(harness: ServiceHarness) -> None:
+    harness.fetcher.script(fetched_ok(normalized(_URL), _PLAIN_BODY))
+    harness.extractor.script(extracted())
+
+    outcome = await harness.service.fetch(service_request(_URL))
+
+    assert outcome.status == "ok"
+    assert outcome.listing_links == ()
+
+
+@pytest.mark.asyncio
+async def test_pdf_outcome_has_no_listing_links(harness: ServiceHarness) -> None:
+    harness.fetcher.script(fetched_ok(normalized(_URL), b"%PDF-1.4 fake body"))
+    harness.extractor.script(extracted())
+
+    outcome = await harness.service.fetch(service_request(_URL))
+
+    assert outcome.status == "ok"
+    assert outcome.document == "pdf"
+    assert outcome.listing_links is None
+
+
+@pytest.mark.asyncio
+async def test_error_outcome_has_no_listing_links(harness: ServiceHarness) -> None:
+    harness.fetcher.script(fetched_blocked(normalized(_URL)))
+
+    outcome = await harness.service.fetch(service_request(_URL))
+
+    assert outcome.status == "blocked"
+    assert outcome.listing_links is None

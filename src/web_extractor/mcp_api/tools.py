@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from web_extractor.domain.content_quality import ContentQuality, assess_content
 from web_extractor.domain.content_type import DocumentKind
 from web_extractor.domain.extract import PageMetadata
+from web_extractor.domain.listing_links import LinkItem
 from web_extractor.domain.ttl import parse_iso_utc
 from web_extractor.domain.types import (
     AgentId,
@@ -38,6 +39,7 @@ from web_extractor.mcp_api.formatting import (
     cursor_line,
     error_text,
     fenced_body,
+    fenced_listing_links,
     retry_render,
 )
 from web_extractor.service.cursor_service import (
@@ -178,6 +180,8 @@ class UrlRow(BaseModel):
     error_kind: str | None = None
     retry_render: RenderMode | None = None
     """For a failed row: the render mode worth one retry, if switching may help."""
+    listing_links_count: int | None = None
+    """Same-site anchor links found in the html body; None when there is no html body."""
 
 
 class PageMeta(BaseModel):
@@ -209,6 +213,14 @@ class PageMeta(BaseModel):
     content_type: str | None = None
     """Only in ``detail=detailed`` responses."""
     content_quality: ContentQuality
+    listing_links: tuple[LinkItem, ...] | None = None
+    """Same-site anchor links from the raw HTML, on the first chunk only.
+
+    None when the body is not an html page. A non-None value also signals in
+    the structured channel that the text is a fragment of the page's real
+    content: on index pages the extracted main text is an arbitrary piece
+    while the page's content is the link list reported here (docs/03).
+    """
 
 
 class FindMeta(BaseModel):
@@ -255,7 +267,12 @@ class ErrorMeta(BaseModel):
 
 
 def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> CallToolResult:
-    """A successful response: text block plus metadata-only structured part."""
+    """A successful response: text block plus metadata-only structured part.
+
+    Strings are passed through as they are: page text and anchor texts reach
+    the response unchanged, so a quote shown by fetch_page is exactly what
+    find_in_page searches (docs/03, the no-sanitization decision).
+    """
     return CallToolResult(
         content=[TextContent(type="text", text=body)],
         structured_content=meta.model_dump(mode="json"),
@@ -372,8 +389,16 @@ def _source_line(outcome: FetchOutcome, now: datetime) -> str:
     return f"source: network, {outcome.fetcher or 'http'}"
 
 
-def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str]:
-    """Common response header lines for a successful outcome."""
+def _header_lines(
+    outcome: FetchOutcome, detail: str, now: datetime, *, listing_links_count: int | None = None
+) -> list[str]:
+    """Common response header lines for a successful outcome.
+
+    ``listing_links_count`` is passed only where the array itself is
+    reported (fetch_page first chunk): together with the fenced LISTING
+    LINKS section it marks that the extracted text may be a fragment of an
+    index page whose real content is the link list.
+    """
     lines = [f"status: {outcome.status}"]
     url_line = f"url: {outcome.url}"
     if outcome.final_url is not None and outcome.final_url != outcome.url:
@@ -386,6 +411,8 @@ def _header_lines(outcome: FetchOutcome, detail: str, now: datetime) -> list[str
         lines.append(f"published: {published}")
     if outcome.document is not None:
         lines.append(f"document: {outcome.document}")
+    if listing_links_count is not None:
+        lines.append(f"listing_links: {listing_links_count}")
     lines.append(_source_line(outcome, now))
     if detail == "detailed":
         lines.append(f"http_status: {outcome.http_status}")
@@ -428,6 +455,10 @@ def _register_fetch_page(server: MCPServer[object], deps: McpToolDeps) -> None:
             "independently verifying someone else's claim. Long pages are "
             "returned in chunks of max_chars; when the response contains a "
             "cursor, call read_more with that cursor to get the next chunk. "
+            "The first chunk of every html page also carries a fenced LISTING "
+            "LINKS section after the body: same-site anchor links found in the "
+            "page. On index pages the main text is often an arbitrary fragment "
+            "while the page's real content is that link list. "
             "Pages are rendered in a real browser by default (render=browser); "
             "render=static is a plain HTTP fetch, faster and the only way to read "
             "PDFs; render=auto fetches statically and uses the browser only for "
@@ -604,7 +635,14 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         if truncated
         else None
     )
-    lines = _header_lines(outcome, args.detail, deps.clock.now())
+    lines = _header_lines(
+        outcome,
+        args.detail,
+        deps.clock.now(),
+        listing_links_count=(
+            len(outcome.listing_links) if outcome.listing_links is not None else None
+        ),
+    )
     quality = assess_content(text)
     lines.append(f"content: {quality}")
     lines.append(f"text_version: {text_version_short(text)} ({shown_format})")
@@ -612,6 +650,8 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
     if cursor_id is not None:
         lines.append(cursor_line(cursor_id))
     lines.append(fenced_body(shown))
+    if outcome.listing_links:
+        lines.append(fenced_listing_links(outcome.listing_links))
 
     meta = PageMeta(
         status="ok",
@@ -635,6 +675,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
         document=outcome.document,
         content_type=outcome.content_type if args.detail == "detailed" else None,
         content_quality=quality,
+        listing_links=outcome.listing_links,
     )
     return _text_response(meta, "\n".join(lines))
 
@@ -930,6 +971,9 @@ def _check_row_meta(outcome: FetchOutcome) -> UrlRow:
         error_kind=outcome.error_kind,
         retry_render=(
             retry_render(_kind_of(outcome), outcome.fetcher) if outcome.status != "ok" else None
+        ),
+        listing_links_count=(
+            len(outcome.listing_links) if outcome.listing_links is not None else None
         ),
     )
 

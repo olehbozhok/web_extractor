@@ -8,10 +8,16 @@ switching fetchers may help, ``<what to do>`` starts with the render mode to
 retry with, chosen from the fetcher that failed (docs/03, section 5).
 """
 
+from collections.abc import Sequence
+
+from web_extractor.domain.listing_links import LinkItem
 from web_extractor.domain.types import ErrorKind, FetcherName, RenderMode
 
 _BEGIN_MARKER = "--- BEGIN UNTRUSTED PAGE CONTENT ---"
 _END_MARKER = "--- END UNTRUSTED PAGE CONTENT ---"
+
+_BEGIN_LINKS_MARKER = "--- BEGIN UNTRUSTED LISTING LINKS ---"
+_END_LINKS_MARKER = "--- END UNTRUSTED LISTING LINKS ---"
 
 _ADVICE: dict[ErrorKind, str] = {
     "invalid_argument": "Fix the named parameter and call again.",
@@ -89,6 +95,19 @@ def error_text(kind: ErrorKind, message: str, fetcher: FetcherName | None) -> st
 def fenced_body(body: str) -> str:
     """Wrap page content between the untrusted-content markers."""
     return f"{_BEGIN_MARKER}\n{body}\n{_END_MARKER}"
+
+
+def fenced_listing_links(links: Sequence[LinkItem]) -> str:
+    """Wrap the listing links in their own untrusted-content fence.
+
+    One link per line as ``- name — link``: the fence is presented as
+    literal text (no markdown rendering, like the body), so link syntax
+    would add nothing while forcing bracket escaping of arbitrary anchor
+    names. The URL is the text after the last `` — `` of a line. Empty
+    input never reaches here: no links, no section (docs/03).
+    """
+    lines = [f"- {item.name} — {item.link}" for item in links]
+    return f"{_BEGIN_LINKS_MARKER}\n" + "\n".join(lines) + f"\n{_END_LINKS_MARKER}"
 
 
 def chunk_line(start: int, end: int, total: int) -> str:

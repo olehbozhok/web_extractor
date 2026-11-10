@@ -33,6 +33,19 @@ _JS_PAGE = b"""
 
 _SPARSE_PAGE = b"<html><body><div></div></body></html>"
 
+_LINKED_ARTICLE = """
+<html>
+  <head><title>Test Headline</title></head>
+  <body>
+    <article>
+      <h1>Big Heading</h1>
+      <p>Read the <a href="https://example.test/source">full source report</a> for details.</p>
+      <p>Paragraph two with another fact.</p>
+    </article>
+  </body>
+</html>
+"""
+
 
 @pytest.mark.asyncio
 async def test_extract_text_with_metadata() -> None:
@@ -54,6 +67,15 @@ async def test_extract_markdown_keeps_headings() -> None:
     assert isinstance(result, Extracted)
     assert "# Big Heading" in result.text
     assert result.format == "markdown"
+
+
+@pytest.mark.asyncio
+async def test_extract_markdown_keeps_links() -> None:
+    """include_links=True: anchors inside the main text survive as markdown links."""
+    extractor = TrafilaturaExtractor()
+    result = await extractor.extract(_LINKED_ARTICLE.encode(), "https://example.test/a", "markdown")
+    assert isinstance(result, Extracted)
+    assert "[full source report](https://example.test/source)" in result.text
 
 
 @pytest.mark.asyncio

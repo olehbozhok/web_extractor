@@ -63,6 +63,10 @@ class TrafilaturaExtractor:
                 output_format=output_format,
                 include_comments=False,
                 include_tables=True,
+                # Links are part of the page an agent reads: without them the
+                # markdown hides navigation and headline lists entirely. For
+                # txt output trafilatura ignores the flag, which is fine.
+                include_links=True,
             )
         except UnicodeDecodeError:
             msg = f"page {final_url} is not decodable as text"

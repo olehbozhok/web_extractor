@@ -44,6 +44,7 @@ from web_extractor.domain.types import (
 )
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
 from web_extractor.extractors.base import Extractor
+from web_extractor.extractors.listing_links import extract_listing_links
 from web_extractor.fetchers.base import Fetcher
 from web_extractor.service.config import ServiceConfig
 from web_extractor.service.domain_limits import DomainLimiter
@@ -345,6 +346,12 @@ class FetchService:
                 text = extract_result.text
                 text_format = page_format
                 await self._cache.put(replace(record, text=text, text_format=page_format))
+        document = sniff_document(record.html) if record.html is not None else None
+        listing_links = (
+            extract_listing_links(record.html, record.final_url)
+            if record.status == "ok" and record.html is not None and document == "html"
+            else None
+        )
         return FetchOutcome(
             status=record.status,
             url=record.url_key,
@@ -359,8 +366,9 @@ class FetchService:
             content_sha256=record.content_sha256,
             error_kind=record.error_kind,
             error_message=record.error_message,
-            document=sniff_document(record.html) if record.html is not None else None,
+            document=document,
             content_type=record.content_type,
+            listing_links=listing_links,
         )
 
     def _record_for_fetched(

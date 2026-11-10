@@ -1,4 +1,4 @@
-"""Error advice: which render mode to retry with depends on the fetcher that failed."""
+"""Error advice and render-mode retries of the response formatter."""
 
 import pytest
 
