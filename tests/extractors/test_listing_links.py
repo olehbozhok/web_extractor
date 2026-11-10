@@ -250,3 +250,38 @@ def test_link_url_with_spaces_is_dropped() -> None:
     links = extract_listing_links(html, _PAGE)
 
     assert [item.name for item in links] == ["Real headline"]
+
+
+def test_link_url_with_trailing_space_is_kept() -> None:
+    """Browsers trim the edge whitespace of an href before resolution (the
+    WHATWG basic URL parser strips both edges), so a real link with a stray
+    trailing space must survive instead of being dropped by the
+    forbidden-character filter: CPython's ``urljoin`` strips only leading
+    ones and preserves a trailing space."""
+    html = _page(_anchor("/news/1 ", "Trailing space"))
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert links == (LinkItem(name="Trailing space", link="https://news.test/news/1"),)
+
+
+def test_link_url_with_leading_spaces_is_kept() -> None:
+    """Leading edge whitespace is trimmed the same way, before resolution:
+    the trim belongs to this parser's contract, not to whatever ``urljoin``
+    happens to strip on a given Python version."""
+    html = _page(_anchor("  /news/1", "Leading spaces"))
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert links == (LinkItem(name="Leading spaces", link="https://news.test/news/1"),)
+
+
+def test_whitespace_only_href_has_no_destination_and_is_dropped() -> None:
+    """After the edge trim a whitespace-only href is empty: it resolves to
+    the current page with no destination of its own, like the fragment
+    hrefs dropped above."""
+    html = _page(_anchor("   ", "Whitespace only"), _anchor("/ok", "Real headline"))
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == ["Real headline"]
