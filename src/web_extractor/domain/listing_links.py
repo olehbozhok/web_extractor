@@ -27,6 +27,14 @@ resolve to the current page."""
 _MIN_NAME_LENGTH = 3
 _MAX_NAME_LENGTH = 200
 
+_BOILERPLATE_ANCESTOR_TAGS = frozenset({"nav", "header", "footer", "aside"})
+"""Containers whose anchors are site navigation, not page content. An
+index-page menu easily outgrows the cap (a 55-item menu displaced every
+headline), so anchors inside these are never listed."""
+
+_BOILERPLATE_ROLES = frozenset({"navigation", "banner", "contentinfo"})
+"""ARIA roles marking the same boilerplate on tag-less containers."""
+
 
 @dataclass(frozen=True, slots=True)
 class LinkItem:
@@ -42,11 +50,13 @@ def extract_listing_links(html: bytes, final_url: str) -> list[LinkItem]:
     ``final_url`` resolves relative hrefs and defines the site: only anchors
     whose host (lowercased, scheme ignored) equals its host are kept. An
     anchor qualifies when its href is fetchable (not a fragment or a
-    ``javascript:``/``mailto:``/``tel:`` scheme), its whitespace-normalized
-    text is 3..200 characters long and carries at least one letter (which
-    filters out dates, counters and icons). Duplicates of ``(name, link)``
-    keep their first occurrence; at most ``LISTING_LINKS_MAX`` links are
-    returned. Unparseable HTML yields ``[]``.
+    ``javascript:``/``mailto:``/``tel:`` scheme), it does not sit inside
+    navigation boilerplate (a ``nav``/``header``/``footer``/``aside`` ancestor
+    or an ancestor with a ``navigation``/``banner``/``contentinfo`` role), its
+    whitespace-normalized text is 3..200 characters long and carries at least
+    one letter (which filters out dates, counters and icons). Duplicates of
+    ``(name, link)`` keep their first occurrence; at most ``LISTING_LINKS_MAX``
+    links are returned. Unparseable HTML yields ``[]``.
     """
     try:
         tree = fromstring(_as_parser_input(html))
@@ -69,6 +79,8 @@ def extract_listing_links(html: bytes, final_url: str) -> list[LinkItem]:
         link = urljoin(final_url, href)
         if _host_of(link) != base_host:
             continue
+        if _in_boilerplate(anchor):
+            continue
         name = " ".join(_anchor_text(anchor).split())
         if not _MIN_NAME_LENGTH <= len(name) <= _MAX_NAME_LENGTH:
             continue
@@ -82,6 +94,17 @@ def extract_listing_links(html: bytes, final_url: str) -> list[LinkItem]:
         if len(links) == LISTING_LINKS_MAX:
             break
     return links
+
+
+def _in_boilerplate(anchor: etree._Element) -> bool:
+    """Whether an ancestor of ``anchor`` marks site navigation."""
+    for ancestor in anchor.iterancestors():
+        if ancestor.tag in _BOILERPLATE_ANCESTOR_TAGS:
+            return True
+        role = ancestor.get("role")
+        if role is not None and role.lower() in _BOILERPLATE_ROLES:
+            return True
+    return False
 
 
 def _host_of(url: str) -> str | None:

@@ -114,6 +114,36 @@ def test_result_is_capped_in_document_order() -> None:
     assert links[-1].link == "https://news.test/page-49"
 
 
+def test_navigation_menu_does_not_displace_headlines() -> None:
+    """A menu longer than the cap, placed first in the document, must not
+    fill the whole result: menu anchors are navigation, not content."""
+    menu = "".join(_anchor(f"/category/{number}", f"Category {number}") for number in range(55))
+    headlines = "".join(_anchor(f"/news/{number}", f"Headline {number}") for number in range(30))
+    html = f"<html><body><header><nav>{menu}</nav></header><main>{headlines}</main></body></html>"
+    html = html.encode()
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == [f"Headline {number}" for number in range(30)]
+
+
+def test_aria_navigation_roles_are_excluded_too() -> None:
+    """role="banner"/"navigation"/"contentinfo" mark the same boilerplate as
+    the nav/header/footer/aside tags."""
+    html = (
+        b"<html><body>"
+        b'<div role="banner"><a href="/brand">Brand home page</a></div>'
+        b'<ul role="navigation"><a href="/cat">Topics menu</a></ul>'
+        b'<main><a href="/story">Real headline</a></main>'
+        b'<footer><a href="/contacts">Contacts page</a></footer>'
+        b"</body></html>"
+    )
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == ["Real headline"]
+
+
 def test_broken_html_yields_no_links() -> None:
     assert extract_listing_links(b"", _PAGE) == []
     assert extract_listing_links(b"\x00\x01\x02\xff", _PAGE) == []
