@@ -28,10 +28,24 @@ resolve to the current page."""
 _MIN_NAME_LENGTH = 3
 _MAX_NAME_LENGTH = 200
 
-_BOILERPLATE_ANCESTOR_TAGS = frozenset({"nav", "header", "footer", "aside"})
-"""Containers whose anchors are site navigation, not page content. An
-index-page menu easily outgrows the cap (a 55-item menu displaced every
-headline), so anchors inside these are never listed."""
+_UNCONDITIONAL_BOILERPLATE_TAGS = frozenset({"nav", "aside"})
+"""Containers whose anchors are site navigation, not page content, in every
+position. An index-page menu easily outgrows the cap (a 55-item menu displaced
+every headline), so anchors inside these are never listed."""
+
+_SECTION_SCOPED_BOILERPLATE_TAGS = frozenset({"header", "footer"})
+"""Boilerplate tags that belong to their nearest sectioning ancestor per the
+HTML5 sectioning rules: a ``header``/``footer`` nested inside ``article``/
+``aside``/``main``/``nav``/``section`` is that section's headline block or
+related-stories footer (the standard index markup is
+``<article><header><h2><a>Headline</a></h2></header></article>``), not the
+site banner. One counts as site chrome only when no sectioning element sits
+above it in the ancestor chain."""
+
+_SECTIONING_ANCESTOR_TAGS = frozenset({"article", "aside", "main", "nav", "section"})
+"""Elements that scope a nested ``header``/``footer`` (HTML5 sectioning
+content, plus ``main`` which the HTML-ARIA rules treat the same way for
+banner/contentinfo)."""
 
 _BOILERPLATE_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA roles marking the same boilerplate on tag-less containers."""
@@ -52,8 +66,9 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
     whose host (lowercased, scheme ignored) equals its host are kept. An
     anchor qualifies when its href is fetchable (not a fragment or a
     ``javascript:``/``mailto:``/``tel:`` scheme), it does not sit inside
-    navigation boilerplate (a ``nav``/``header``/``footer``/``aside`` ancestor
-    or an ancestor with a ``navigation``/``banner``/``contentinfo`` role), its
+    navigation boilerplate (a ``nav``/``aside`` ancestor, a
+    ``header``/``footer`` ancestor with no sectioning element above it, or an
+    ancestor with a ``navigation``/``banner``/``contentinfo`` role), its
     whitespace-normalized text is 3..200 characters long and carries at least
     one letter (which filters out dates, counters and icons), and the resolved
     URL carries no whitespace or control characters. Duplicates of
@@ -101,9 +116,25 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
 
 
 def _in_boilerplate(anchor: etree._Element) -> bool:
-    """Whether an ancestor of ``anchor`` marks site navigation."""
-    for ancestor in anchor.iterancestors():
-        if ancestor.tag in _BOILERPLATE_ANCESTOR_TAGS:
+    """Whether an ancestor of ``anchor`` marks site navigation.
+
+    ``nav`` and ``aside`` ancestors and the boilerplate ARIA roles disqualify
+    the anchor unconditionally. A ``header``/``footer`` ancestor counts as
+    site chrome only when no sectioning element (``article``/``aside``/
+    ``main``/``nav``/``section``) sits above it in the chain: per the HTML5
+    sectioning rules a header/footer belongs to its nearest sectioning
+    ancestor, so the standard index markup
+    ``<article><header><h2><a>Headline</a></h2></header></article>`` is
+    content, not banner. A section-scoped header/footer keeps the walk going:
+    a further ancestor (a real ``nav``) can still disqualify the anchor.
+    """
+    ancestors = list(anchor.iterancestors())
+    for position, ancestor in enumerate(ancestors):
+        if ancestor.tag in _SECTION_SCOPED_BOILERPLATE_TAGS and not any(
+            higher.tag in _SECTIONING_ANCESTOR_TAGS for higher in ancestors[position + 1 :]
+        ):
+            return True
+        if ancestor.tag in _UNCONDITIONAL_BOILERPLATE_TAGS:
             return True
         role = ancestor.get("role")
         if role is not None and role.lower() in _BOILERPLATE_ROLES:
