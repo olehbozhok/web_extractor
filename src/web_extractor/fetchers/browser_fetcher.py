@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from web_extractor.domain.content_type import header_value
 from web_extractor.domain.fetch import (
     Fetched,
     FetchFailure,
@@ -37,11 +38,12 @@ from web_extractor.domain.types import (
     HTTP_OK_MAX,
     HTTP_OK_MIN,
     HTTP_REDIRECT_CODES,
+    HTTP_TOO_MANY_REQUESTS,
     Clock,
     HttpStatus,
 )
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
-from web_extractor.fetchers.base import Resolver, port_failure
+from web_extractor.fetchers.base import Resolver, parse_retry_after, port_failure
 
 _BROWSER_UNAVAILABLE_NOTE = "browser service unreachable"
 
@@ -196,8 +198,13 @@ class BrowserFetcher:
         violation = await self._check_host(parsed)
         if violation is not None:
             msg = f"{parsed} resolves to forbidden address (rule: {violation.rule})"
-            return FetchFailure("ssrf_blocked", msg, final_url=request.url)
+            return FetchFailure("ssrf_blocked", msg, final_url=parsed)
+        return self._result_for_status(request, answer, parsed)
 
+    def _result_for_status(
+        self, request: FetchRequest, answer: _CrawlAnswer, parsed: NormalizedUrl
+    ) -> FetchResult:
+        """The failure or success mapped from the answer's final status."""
         code = answer.redirected_status_code or answer.status_code
         if code is None:
             reason = _navigation_error(answer.error_message)
@@ -207,7 +214,16 @@ class BrowserFetcher:
         kind = _failure_kind_for(code, answer.html)
         if kind is not None:
             msg = f"{request.url} returned {code} through the browser ({kind})"
-            return FetchFailure(kind, msg, http_status=status, final_url=parsed)
+            retry_after = (
+                parse_retry_after(
+                    header_value(answer.response_headers, "retry-after"), self._clock.now()
+                )
+                if kind == "blocked" and status.value == HTTP_TOO_MANY_REQUESTS
+                else None
+            )
+            return FetchFailure(
+                kind, msg, http_status=status, final_url=parsed, retry_after_s=retry_after
+            )
         body = answer.html.encode("utf-8")
         if len(body) > self._config.max_response_bytes:
             msg = (

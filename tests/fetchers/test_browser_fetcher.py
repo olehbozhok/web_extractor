@@ -129,6 +129,40 @@ async def test_403_maps_to_blocked() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_429_keeps_its_retry_after_header() -> None:
+    """docs/01, 4.5: a 429 must not be retried before Retry-After; the
+    browser path carries the header into the failure like the static one."""
+    payload = _crawl_payload(
+        status_code=429, redirected_status_code=429, response_headers={"Retry-After": "3600"}
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+    assert result.retry_after_s is not None
+    assert result.retry_after_s.value == 3600
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_retry_after_header_is_found_regardless_of_key_case() -> None:
+    """Crawl4AI passes response headers through as received."""
+    payload = _crawl_payload(
+        status_code=429, redirected_status_code=429, response_headers={"RETRY-AFTER": "120"}
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.retry_after_s is not None
+    assert result.retry_after_s.value == 120
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_redirect_into_forbidden_network_is_ssrf_blocked() -> None:
     """302 -> final 403 with the egress proxy's URL blocked body (spike 02, 6)."""
     payload = _crawl_payload(
