@@ -57,7 +57,7 @@ uv run python -m web_extractor   # запуск без Docker (WX_ env, див. 
 |---|---|
 | `src/web_extractor/domain/` | чисті типи й правила без I/O: `NormalizedUrl`, SSRF-правила, TTL |
 | `src/web_extractor/storage/` | SQLite (WAL), міграції, репозиторії, статистика |
-| `src/web_extractor/fetchers/` | `HttpFetcher` на httpx з pinned-DNS SSRF-захистом |
+| `src/web_extractor/fetchers/` | `HttpFetcher` на httpx з pinned-DNS SSRF-захистом і `BrowserFetcher` (адаптер Crawl4AI) |
 | `src/web_extractor/extractors/` | `TrafilaturaExtractor` (у робочому потоці) |
 | `src/web_extractor/service/` | конвеєр: кеш, single-flight, ліміти доменів, курсори, пошук |
 | `src/web_extractor/mcp_api/` | MCP-інструменти, форматування відповідей, composition root |
