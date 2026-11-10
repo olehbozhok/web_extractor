@@ -144,6 +144,62 @@ def test_aria_navigation_roles_are_excluded_too() -> None:
     assert [item.name for item in links] == ["Real headline"]
 
 
+def test_article_headline_headers_are_not_site_banners() -> None:
+    """Standard index markup is <article><header><h2><a>: per the HTML5
+    sectioning rules the header belongs to its article, not to the site,
+    so every headline link is content (this used to return zero links)."""
+    articles = "".join(
+        f"<article><header><h2>"
+        f"{_anchor(f'/news/{number}', f'Headline {number}')}"
+        f"</h2></header></article>"
+        for number in range(20)
+    )
+    page = f"<html><body><main>{articles}</main></body></html>"
+
+    links = extract_listing_links(page.encode(), _PAGE)
+
+    assert [item.name for item in links] == [f"Headline {number}" for number in range(20)]
+    assert [item.link for item in links] == [
+        f"https://news.test/news/{number}" for number in range(20)
+    ]
+
+
+def test_header_without_sectioning_ancestor_is_still_a_site_banner() -> None:
+    """A header directly under body has no sectioning ancestor, so it is the
+    site banner: its anchors are navigation even though they look like content."""
+    html = _page(
+        '<header><a href="/menu">Menu item one</a></header>',
+        _anchor("/story", "Real headline"),
+    )
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == ["Real headline"]
+
+
+def test_header_scoped_by_main_is_content() -> None:
+    """<main><header><a>: the header is scoped by the main element, so it is
+    the page's intro block, not the site banner."""
+    html = _page('<main><header><a href="/lead">Lead story</a></header></main>')
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == ["Lead story"]
+
+
+def test_article_footer_is_content_but_site_footer_is_not() -> None:
+    """A footer inside an article is that article's related-stories block;
+    a body-level footer is the site colophon and stays excluded."""
+    html = _page(
+        '<article><footer><a href="/related">Related story</a></footer></article>',
+        '<footer><a href="/contacts">Contacts page</a></footer>',
+    )
+
+    links = extract_listing_links(html, _PAGE)
+
+    assert [item.name for item in links] == ["Related story"]
+
+
 def test_broken_html_yields_no_links() -> None:
     assert extract_listing_links(b"", _PAGE) == ()
     assert extract_listing_links(b"\x00\x01\x02\xff", _PAGE) == ()
