@@ -11,10 +11,12 @@ from collections import Counter
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from web_extractor.domain.types import ErrorKind
 from web_extractor.storage.database import Database
 from web_extractor.storage.rows import (
     as_bool,
     as_int,
+    as_opt_error_kind,
     as_opt_fetcher,
     as_opt_int,
     as_opt_str,
@@ -45,6 +47,7 @@ class PeriodStats:
     by_http_status: dict[str, int]
     by_fetcher: dict[str, int]
     needs_browser_count: int
+    empty_render_count: int
     unknown_agent_count: int
     top_agents: tuple[NamedCount, ...]
     top_tasks: tuple[NamedCount, ...]
@@ -66,6 +69,7 @@ class _RawEvent:
     cache_hit: bool
     fetcher: str | None
     duration_ms: int
+    error_kind: ErrorKind | None
 
 
 async def collect_period_stats(
@@ -83,7 +87,7 @@ async def collect_period_stats(
     """
     query = """
         SELECT agent, task, url, status, http_status, cache_hit, fetcher,
-               duration_ms
+               duration_ms, error_kind
         FROM events
         WHERE ts >= ? AND ts <= ?
     """
@@ -104,6 +108,7 @@ def _parse_event_row(row: sqlite3.Row) -> _RawEvent:
         cache_hit=as_bool(row_value(row, "cache_hit"), "cache_hit"),
         fetcher=as_opt_fetcher(row_value(row, "fetcher"), "fetcher"),
         duration_ms=as_int(row_value(row, "duration_ms"), "duration_ms"),
+        error_kind=as_opt_error_kind(row_value(row, "error_kind"), "error_kind"),
     )
 
 
@@ -119,6 +124,7 @@ def _aggregate(events: list[_RawEvent], top_limit: int) -> PeriodStats:
     durations: list[int] = []
     cache_hits = 0
     needs_browser_count = 0
+    empty_render_count = 0
     unknown_agent_count = 0
 
     for event in events:
@@ -136,6 +142,8 @@ def _aggregate(events: list[_RawEvent], top_limit: int) -> PeriodStats:
             cache_hits += 1
         if event.status == "needs_browser":
             needs_browser_count += 1
+        if event.error_kind == "empty_render":
+            empty_render_count += 1
         if event.agent == "unknown":
             unknown_agent_count += 1
 
@@ -146,6 +154,7 @@ def _aggregate(events: list[_RawEvent], top_limit: int) -> PeriodStats:
         by_http_status=_sorted_counts(http_status_counter),
         by_fetcher=_sorted_counts(fetcher_counter),
         needs_browser_count=needs_browser_count,
+        empty_render_count=empty_render_count,
         unknown_agent_count=unknown_agent_count,
         top_agents=_top(agent_counter, top_limit),
         top_tasks=_top(task_counter, top_limit),

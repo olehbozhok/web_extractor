@@ -17,6 +17,7 @@
   <div class="card"><div class="value">{{ view.total_events }}</div><div class="label">Requests</div></div>
   <div class="card"><div class="value">{{ view.hit_rate_pct }}%</div><div class="label">Cache hit rate</div></div>
   <div class="card"><div class="value">{{ view.needs_browser_share_pct }}%</div><div class="label">Needs browser</div></div>
+  <div class="card"><div class="value">{{ view.empty_render_share_pct }}%</div><div class="label">Empty renders</div></div>
   <div class="card"><div class="value">{{ view.unknown_agent_share_pct }}%</div><div class="label">Unknown agents</div></div>
   <div class="card"><div class="value">{{ view.duration_p50_ms if view.duration_p50_ms is not none else "–" }}</div><div class="label">Duration p50, ms</div></div>
   <div class="card"><div class="value">{{ view.duration_p95_ms if view.duration_p95_ms is not none else "–" }}</div><div class="label">Duration p95, ms</div></div>
