@@ -3,7 +3,9 @@
 import time
 from ipaddress import IPv4Address, IPv6Address
 
+import httpx
 import pytest
+import respx
 
 from tests.fetchers.fetch_helpers import (
     FIXED_NOW,
@@ -90,6 +92,71 @@ async def test_blocked_403_and_429_are_value_failures() -> None:
     assert isinstance(throttled, FetchFailure)
     assert throttled.kind == "blocked"
     assert throttled.retry_after_s is not None and throttled.retry_after_s.value == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hostile_retry_after", ["²", "9" * 4301])
+async def test_hostile_retry_after_is_treated_as_absent(hostile_retry_after: str) -> None:
+    """'²'.isdigit() is True yet int('²') raises, and a digit run beyond
+    CPython's 4300-digit int limit does the same: a hostile Retry-After must
+    come back as an ordinary block without retry advice, never as a crash
+    (the header is best-effort, docs/01, 4.5)."""
+
+    def handler(_path: str, _headers: dict[str, str]) -> ScriptedResponse:
+        return ScriptedResponse(429, {"Retry-After": hostile_retry_after}, b"slow down")
+
+    with LoopbackHttpServer(handler) as server:
+        resolver = StaticResolver({_HOST: [IPv4Address("127.0.0.1")]})
+        fetcher = _fetcher(server.port, resolver)
+        result = await fetcher.fetch(_request(server.url_for(_HOST, "/throttled")))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+    assert result.http_status is not None and result.http_status.value == 429
+    assert result.retry_after_s is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_non_ascii_digit_content_length_is_treated_as_absent() -> None:
+    """A declared Content-Length that int() cannot parse (h11 would refuse it
+    on a real wire, so this arrives via a mock transport) must not crash the
+    fetch: the declared check is skipped and the streamed size decides. The
+    value rides the mock as latin-1 wire bytes, exactly as a real header."""
+    resolver = StaticResolver({_HOST: [IPv4Address("127.0.0.1")]})
+    fetcher = _fetcher(80, resolver)
+    respx.get("http://site.test/bad-length").mock(
+        return_value=httpx.Response(
+            200, headers=[(b"content-length", "²".encode("latin-1"))], content=_OK_BODY
+        )
+    )
+    result = await fetcher.fetch(_request("http://site.test/bad-length"))
+    assert isinstance(result, Fetched)
+    assert result.body == _OK_BODY
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_huge_digit_run_content_length_still_enforces_the_size_limit() -> None:
+    """A 4301-digit declared Content-Length must not crash the fetch, and
+    ignoring it must not disable the limit: the streamed size still trips
+    too_large (docs/01, 4.5)."""
+    config = HttpFetcherConfig(
+        user_agent="test",
+        max_response_bytes=100,
+        connect_timeout_s=2.0,
+        read_timeout_s=2.0,
+        total_timeout_s=5.0,
+        max_redirects=3,
+        allowed_ports=(80, 443),
+    )
+    resolver = StaticResolver({_HOST: [IPv4Address("127.0.0.1")]})
+    fetcher = HttpFetcher(config, FixedClock(FIXED_NOW), resolver, _allow_loopback_only)
+    respx.get("http://site.test/huge-length").mock(
+        return_value=httpx.Response(200, headers={"Content-Length": "9" * 4301}, content=b"x" * 101)
+    )
+    result = await fetcher.fetch(_request("http://site.test/huge-length"))
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "too_large"
 
 
 @pytest.mark.asyncio

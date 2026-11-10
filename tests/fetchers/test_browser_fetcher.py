@@ -147,6 +147,30 @@ async def test_429_keeps_its_retry_after_header() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hostile_retry_after", ["²", "9" * 4301])
+async def test_hostile_retry_after_stays_blocked_without_advice(
+    hostile_retry_after: str,
+) -> None:
+    """A Retry-After that int() cannot parse (non-ASCII digits, or a digit
+    run beyond CPython's 4300-digit int limit) must not crash the fetch:
+    the header is best-effort, so the 429 comes back as an ordinary block
+    with no retry advice (docs/01, 4.5)."""
+    payload = _crawl_payload(
+        status_code=429,
+        redirected_status_code=429,
+        response_headers={"Retry-After": hostile_retry_after},
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+    assert result.retry_after_s is None
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_retry_after_header_is_found_regardless_of_key_case() -> None:
     """Crawl4AI passes response headers through as received."""
     payload = _crawl_payload(

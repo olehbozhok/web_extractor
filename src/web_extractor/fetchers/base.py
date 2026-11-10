@@ -55,14 +55,14 @@ def parse_retry_after(raw: str | None, now: datetime) -> PositiveInt | None:
     """Retry-After as seconds (integer form, then HTTP-date form).
 
     Shared by both fetchers; ``raw`` is the header value already looked up
-    case-insensitively by the caller.
+    case-insensitively by the caller. The header is best-effort: any value
+    that is not a sane positive duration is treated as absent (``None``).
     """
     if raw is None:
         return None
     stripped = raw.strip()
-    if stripped.isdigit():
-        seconds = int(stripped)
-    else:
+    seconds = _integer_seconds(stripped)
+    if seconds is None:
         try:
             when = parsedate_to_datetime(stripped)
         except (TypeError, ValueError):
@@ -73,3 +73,19 @@ def parse_retry_after(raw: str | None, now: datetime) -> PositiveInt | None:
     if seconds <= 0 or seconds > _RETRY_AFTER_MAX_SECONDS:
         return None
     return PositiveInt(seconds)
+
+
+def _integer_seconds(text: str) -> int | None:
+    """The integer-form value of ``text``, or None when ``int()`` cannot read it.
+
+    ``str.isdigit()`` alone lies: superscript digits (``'²'``) pass it while
+    ``int()`` raises ValueError, and a digit run beyond CPython's 4300-digit
+    int-parsing limit does the same. A hostile header must degrade to
+    "absent", never crash the fetch.
+    """
+    if not (text.isascii() and text.isdigit()):
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
