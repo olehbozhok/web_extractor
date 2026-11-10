@@ -32,6 +32,7 @@ def dashboard_view(stats: PeriodStats) -> dict[str, object]:
         "by_status": stats.by_status,
         "by_http_status": stats.by_http_status,
         "needs_browser_share_pct": _share(stats.needs_browser_count, total),
+        "empty_render_share_pct": _share(stats.empty_render_count, total),
         "unknown_agent_share_pct": _share(stats.unknown_agent_count, total),
         "top_agents": stats.top_agents,
         "top_tasks": stats.top_tasks,

@@ -111,6 +111,7 @@ _ERROR_KIND_TABLE: dict[str, ErrorKind] = {
     "not_found": "not_found",
     "timeout": "timeout",
     "needs_browser": "needs_browser",
+    "empty_render": "empty_render",
     "too_large": "too_large",
     "dns": "dns",
     "network": "network",

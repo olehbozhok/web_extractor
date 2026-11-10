@@ -5,7 +5,7 @@ from typing import NamedTuple
 import pytest
 
 from web_extractor.domain.records import Event
-from web_extractor.domain.types import FetcherName, Status
+from web_extractor.domain.types import ErrorKind, FetcherName, Status
 from web_extractor.storage import (
     Database,
     EventRepository,
@@ -26,6 +26,7 @@ class _Case(NamedTuple):
     fetcher: FetcherName | None = "http"
     duration_ms: int = 100
     task: str | None = None
+    error_kind: ErrorKind | None = None
 
 
 def _event(request_id: str, case: _Case) -> Event:
@@ -47,7 +48,7 @@ def _event(request_id: str, case: _Case) -> Event:
         queue_ms=0,
         size_bytes=None,
         content_sha256=None,
-        error_kind=None,
+        error_kind=case.error_kind,
     )
 
 
@@ -138,3 +139,49 @@ async def test_empty_period_gives_zeroed_stats(database: Database) -> None:
     assert stats.top_domains == ()
     assert stats.duration_p50_ms is None
     assert stats.duration_p95_ms is None
+
+
+@pytest.mark.asyncio
+async def test_empty_render_errors_are_counted(database: Database) -> None:
+    """empty_render (the browser rendered the page but no text could be
+    extracted, status is ``error``) is its own dashboard metric, next to
+    needs_browser (docs/01 section 4.7)."""
+    repo = EventRepository(database)
+    await repo.append(
+        _event(
+            "r0",
+            _Case(
+                ts="2026-11-09T10:00:00+00:00",
+                agent="alpha",
+                url="https://news.example.org/a",
+                status="error",
+                http_status=None,
+                fetcher="browser",
+                error_kind="empty_render",
+            ),
+        )
+    )
+    await repo.append(
+        _event(
+            "r1",
+            _Case(
+                ts="2026-11-09T11:00:00+00:00",
+                agent="alpha",
+                url="https://news.example.org/b",
+                status="error",
+                http_status=None,
+                fetcher=None,
+                error_kind="unknown_cursor",
+            ),
+        )
+    )
+
+    stats = await collect_period_stats(
+        database,
+        since_iso="2026-11-09T00:00:00+00:00",
+        until_iso="2026-11-09T23:59:59+00:00",
+    )
+
+    assert stats.empty_render_count == 1
+    assert stats.needs_browser_count == 0
+    assert stats.by_status == {"error": 2}
