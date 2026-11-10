@@ -39,6 +39,7 @@ from web_extractor.mcp_api.formatting import (
     cursor_line,
     error_text,
     fenced_body,
+    fenced_listing_links,
     retry_render,
 )
 from web_extractor.service.cursor_service import (
@@ -394,9 +395,9 @@ def _header_lines(
     """Common response header lines for a successful outcome.
 
     ``listing_links_count`` is passed only where the array itself is
-    reported (fetch_page first chunk): its presence in the text channel is
-    the signal that the extracted text is a fragment, e.g. of an index page
-    whose real content is the link list.
+    reported (fetch_page first chunk): together with the fenced LISTING
+    LINKS section it marks that the extracted text may be a fragment of an
+    index page whose real content is the link list.
     """
     lines = [f"status: {outcome.status}"]
     url_line = f"url: {outcome.url}"
@@ -454,6 +455,10 @@ def _register_fetch_page(server: MCPServer[object], deps: McpToolDeps) -> None:
             "independently verifying someone else's claim. Long pages are "
             "returned in chunks of max_chars; when the response contains a "
             "cursor, call read_more with that cursor to get the next chunk. "
+            "The first chunk of every html page also carries a fenced LISTING "
+            "LINKS section after the body: same-site anchor links found in the "
+            "page. On index pages the main text is often an arbitrary fragment "
+            "while the page's real content is that link list. "
             "Pages are rendered in a real browser by default (render=browser); "
             "render=static is a plain HTTP fetch, faster and the only way to read "
             "PDFs; render=auto fetches statically and uses the browser only for "
@@ -645,6 +650,8 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
     if cursor_id is not None:
         lines.append(cursor_line(cursor_id))
     lines.append(fenced_body(shown))
+    if outcome.listing_links:
+        lines.append(fenced_listing_links(outcome.listing_links))
 
     meta = PageMeta(
         status="ok",

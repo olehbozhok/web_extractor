@@ -50,6 +50,26 @@ async def test_first_chunk_carries_listing_links_unchanged(mcp: McpHarness) -> N
 
 
 @pytest.mark.asyncio
+async def test_first_chunk_text_carries_the_fenced_listing_section(mcp: McpHarness) -> None:
+    """The array is duplicated into the text block: clients that forward only
+    the text channel must still hand the links to the model (docs/03, 4)."""
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL), _PAGE_BODY))
+    mcp.extractor.script(extracted(_LONG, page_format="markdown"))
+
+    result = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
+
+    text = _text_of(result)
+    assert "--- BEGIN UNTRUSTED LISTING LINKS ---" in text
+    assert "- First \U0001f996 headline — https://news.test/a" in text
+    assert "- Second headline — https://news.test/b" in text
+    assert "--- END UNTRUSTED LISTING LINKS ---" in text
+    # The section stands outside the page body, after its fence.
+    assert text.index("--- END UNTRUSTED PAGE CONTENT ---") < text.index(
+        "--- BEGIN UNTRUSTED LISTING LINKS ---"
+    )
+
+
+@pytest.mark.asyncio
 async def test_continuation_chunk_carries_no_listing_links(mcp: McpHarness) -> None:
     mcp.browser_fetcher.script(fetched_ok(normalized(_URL), _PAGE_BODY))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
@@ -63,6 +83,17 @@ async def test_continuation_chunk_carries_no_listing_links(mcp: McpHarness) -> N
     assert more.structured_content is not None
     assert more.structured_content["listing_links"] is None
     assert "listing_links" not in _text_of(more)
+    assert "UNTRUSTED LISTING LINKS" not in _text_of(more)
+
+
+@pytest.mark.asyncio
+async def test_find_in_page_carries_no_listing_section(mcp: McpHarness) -> None:
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL), _PAGE_BODY))
+    mcp.extractor.script(extracted(_LONG))
+
+    result = await _call(mcp, "find_in_page", {"url": _URL, "query": "sentence"})
+
+    assert "UNTRUSTED LISTING LINKS" not in _text_of(result)
 
 
 @pytest.mark.asyncio
@@ -89,6 +120,9 @@ async def test_html_without_anchors_reports_an_empty_array(mcp: McpHarness) -> N
 
     assert result.structured_content is not None
     assert result.structured_content["listing_links"] == []
+    # An empty array builds no section; the header count line stays.
+    assert "listing_links: 0" in _text_of(result)
+    assert "UNTRUSTED LISTING LINKS" not in _text_of(result)
 
 
 @pytest.mark.asyncio
