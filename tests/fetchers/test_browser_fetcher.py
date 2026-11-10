@@ -147,6 +147,30 @@ async def test_429_keeps_its_retry_after_header() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hostile_retry_after", ["²", "9" * 4301])
+async def test_hostile_retry_after_stays_blocked_without_advice(
+    hostile_retry_after: str,
+) -> None:
+    """A Retry-After that int() cannot parse (non-ASCII digits, or a digit
+    run beyond CPython's 4300-digit int limit) must not crash the fetch:
+    the header is best-effort, so the 429 comes back as an ordinary block
+    with no retry advice (docs/01, 4.5)."""
+    payload = _crawl_payload(
+        status_code=429,
+        redirected_status_code=429,
+        response_headers={"Retry-After": hostile_retry_after},
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "blocked"
+    assert result.retry_after_s is None
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_retry_after_header_is_found_regardless_of_key_case() -> None:
     """Crawl4AI passes response headers through as received."""
     payload = _crawl_payload(
@@ -198,13 +222,52 @@ async def test_public_redirect_into_blocked_body_is_ssrf_blocked() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_redirect_to_normal_200_page_carrying_the_phrase_is_fetched() -> None:
+    """docs/01, 4.2: the egress-proxy signature is a redirect with a FINAL
+    block code and the proxy body. A 302 landing on a real 200 page whose
+    text merely contains the phrase must be fetched, not cached as an
+    ssrf_blocked error for the error TTL."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=200,
+        html="<html><body>We say: URL blocked, sorry</body></html>",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, Fetched)
+    assert result.http_status.value == 200
+    assert b"URL blocked, sorry" in result.body
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_redirect_to_final_404_carrying_the_phrase_is_not_found() -> None:
+    """The same signature rule: a 302 whose FINAL code is 404 is a missing
+    page even when the body carries the proxy phrase (docs/01, 4.2)."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=404,
+        html="<html><body>Nothing here: URL blocked, sorry</body></html>",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "not_found"
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_genuine_403_carrying_the_phrase_stays_blocked() -> None:
     """A true 403 page that happens to contain 'URL blocked' is anti-bot,
     not the egress proxy: no redirect happened."""
     payload = _crawl_payload(
         status_code=403,
         redirected_status_code=403,
-        html="<html><body>We have blocked this URL for your safety</body></html>",
+        html="<html><body>We say: URL blocked, sorry</body></html>",
     )
     respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
 

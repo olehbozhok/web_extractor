@@ -295,12 +295,8 @@ class HttpFetcher:
             msg = f"{url} returned unsupported content type {media_type(content_type)!r}"
             return FetchFailure("unsupported_type", msg, http_status=status, final_url=url)
 
-        declared = response.headers.get("content-length")
-        if (
-            declared is not None
-            and declared.isdigit()
-            and int(declared) > self._config.max_response_bytes
-        ):
+        declared = _declared_body_size(response.headers.get("content-length"))
+        if declared is not None and declared > self._config.max_response_bytes:
             msg = f"{url} body is {declared} bytes, limit is {self._config.max_response_bytes}"
             return FetchFailure("too_large", msg, http_status=status, final_url=url)
 
@@ -321,6 +317,22 @@ class HttpFetcher:
             fetcher="http",
             redirect_chain=chain,
         )
+
+
+def _declared_body_size(declared: str | None) -> int | None:
+    """The declared Content-Length, or None when absent or not parseable.
+
+    ``str.isdigit()`` alone lies: superscript digits (``'²'``) pass it while
+    ``int()`` raises ValueError, and a digit run beyond CPython's 4300-digit
+    int-parsing limit does the same. A hostile header must degrade to
+    "absent" — the streamed size check still enforces the limit (docs/01, 4.5).
+    """
+    if declared is None or not (declared.isascii() and declared.isdigit()):
+        return None
+    try:
+        return int(declared)
+    except ValueError:
+        return None
 
 
 def _redirect_target(url: NormalizedUrl, response: httpx.Response) -> NormalizedUrl | FetchFailure:
