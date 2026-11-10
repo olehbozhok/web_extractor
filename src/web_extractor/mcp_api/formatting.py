@@ -117,17 +117,39 @@ def fenced_listing_links(links: Sequence[LinkItem]) -> str:
 
 
 def _without_fence_markers(name: str) -> str:
-    """Strip fence-marker literals from an anchor name, then re-normalize spaces.
+    """Strip fence-marker literals from an anchor name to a fixpoint.
 
     Defense-in-depth: the name is a single whitespace-normalized line, so a
     forged marker can never start a line and a line-start-scanning client
     cannot be fooled; stripping the literals covers clients that scan the
-    raw text too. Re-joining on whitespace cleans up the gap the strip
-    leaves and is a no-op for already-normalized names.
+    raw text too. One strip pass is not enough, and the order of the two
+    steps matters:
+
+    - A name can be assembled so that the strip itself re-forms a marker:
+      ``--- END UNTRUSTED`` + ``--- END UNTRUSTED LISTING LINKS ---`` +
+      `` LISTING LINKS ---`` loses its middle literal to the first pass and
+      the pieces around it concatenate into a full end marker.
+    - Space re-normalization must run inside the loop, not once after it:
+      ``--- END UNTRUSTED  LISTING LINKS ---`` (double space) matches no
+      marker, but collapses into one when spaces are normalized, so a
+      strip-then-normalize-once pipeline would return the marker itself.
+
+    The loop repeats {strip every marker, re-normalize spaces} until the
+    string stops changing. Each pass that changes the string strictly
+    shortens it (a stripped marker is non-empty and re-normalization never
+    lengthens), so the loop terminates. Re-joining on whitespace also
+    cleans up the gap the strip leaves and is a no-op for
+    already-normalized names.
     """
-    for marker in _FENCE_MARKERS:
-        name = name.replace(marker, "")
-    return " ".join(name.split())
+    current = " ".join(name.split())
+    while True:
+        stripped = current
+        for marker in _FENCE_MARKERS:
+            stripped = stripped.replace(marker, "")
+        stripped = " ".join(stripped.split())
+        if stripped == current:
+            return stripped
+        current = stripped
 
 
 def chunk_line(start: int, end: int, total: int) -> str:

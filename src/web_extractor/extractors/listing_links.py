@@ -10,6 +10,7 @@ Pure parser: no I/O, deterministic; broken HTML yields an empty array, not
 an error, because the field is best-effort by design.
 """
 
+from typing import Final
 from urllib.parse import urljoin, urlsplit
 
 from lxml import etree
@@ -50,13 +51,31 @@ banner/contentinfo)."""
 _BOILERPLATE_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA roles marking the same boilerplate on tag-less containers."""
 
-_URL_FORBIDDEN_CHARACTERS = frozenset(chr(code) for code in range(0x21)) | {"\x7f"}
-"""Whitespace and control characters: a URL carrying any of them is dropped.
-``urljoin`` preserves raw newlines taken from numeric references in an href,
-and a link printed into the fenced listing section could forge its markers
-or break the "link is the text after the last `` — ``" reading rule. Hrefs
-with such characters are malformed for HTTP anyway, and the field is
-best-effort by design."""
+_URL_FORBIDDEN_CHARACTERS = frozenset(chr(code) for code in range(0x21)) | {
+    "\x7f",
+    "\u0085",
+    "\u2028",
+    "\u2029",
+}
+"""Whitespace and control characters, plus the Unicode line separators
+U+0085 (NEL), U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR): any
+of them inside a URL rejects the link, so a URL carries no character a
+reader can take for an end of line (``str.splitlines()`` and many readers
+treat the three separators as line ends, like a newline). ``urljoin`` preserves
+a trailing space of an href (CPython strips only leading C0-and-space) and
+raw newlines taken from numeric references in an href, and a link printed
+into the fenced listing section could forge its markers or break the
+"link is the text after the last `` — ``" reading rule. A URL with such
+characters inside is malformed for HTTP anyway, and the field is
+best-effort by design. At the edges of an href the same characters are not
+a rejection case: they are trimmed off before resolution, as browsers trim
+both edges (see ``_URL_EDGE_TRIM_CHARACTERS``)."""
+
+_URL_EDGE_TRIM_CHARACTERS: Final[str] = "".join(sorted(_URL_FORBIDDEN_CHARACTERS))
+"""The forbidden characters as one string: ``str.strip`` takes a string of
+characters, not a frozenset. Derived from the same set, so the edge trim
+applied to an href and the inside rejection applied to the resolved URL
+always cover the same characters."""
 
 
 def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
@@ -70,8 +89,11 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
     ``header``/``footer`` ancestor with no sectioning element above it, or an
     ancestor with a ``navigation``/``banner``/``contentinfo`` role), its
     whitespace-normalized text is 3..200 characters long and carries at least
-    one letter (which filters out dates, counters and icons), and the resolved
-    URL carries no whitespace or control characters. Duplicates of
+    one letter (which filters out dates, counters and icons), and its URL is
+    resolved from the href with the edge whitespace and control characters
+    trimmed off first (browsers trim both edges of an href; a whitespace or
+    control character inside the resolved URL still rejects the link, so a
+    whitespace-only href is dropped like a fragment). Duplicates of
     ``(name, link)`` keep their first occurrence; at most ``LISTING_LINKS_MAX``
     links are returned. Unparseable HTML yields ``()``.
     """
@@ -87,16 +109,8 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
     links: list[LinkItem] = []
     seen: set[tuple[str, str]] = set()
     for anchor in tree.iter("a"):
-        href = anchor.get("href")
-        if not href or href.startswith("#"):
-            continue
-        lowered = href.lower()
-        if any(lowered.startswith(prefix) for prefix in _SKIPPED_HREF_PREFIXES):
-            continue
-        link = urljoin(final_url, href)
-        if _host_of(link) != base_host:
-            continue
-        if any(character in _URL_FORBIDDEN_CHARACTERS for character in link):
+        link = _same_site_link(anchor, final_url, base_host)
+        if link is None:
             continue
         if _in_boilerplate(anchor):
             continue
@@ -113,6 +127,38 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
         if len(links) == LISTING_LINKS_MAX:
             break
     return tuple(links)
+
+
+def _same_site_link(anchor: etree._Element, final_url: str, base_host: str) -> str | None:
+    """The absolute same-site URL behind ``anchor``'s href, or None.
+
+    None when the anchor yields no fetchable same-site URL: the href is
+    missing, empty after the edge trim (a whitespace-only href resolves to
+    the current page with no destination of its own), a fragment, a
+    ``javascript:``/``mailto:``/``tel:`` scheme, a link to another host, or
+    a URL carrying a forbidden character inside. The edge whitespace and
+    control characters of the href are trimmed off before resolution, like
+    browsers trim both edges of an href (WHATWG basic URL parser); the
+    characters inside the resolved URL still reject the link.
+    """
+    href = anchor.get("href")
+    if href is None:
+        return None
+    # CPython's urljoin strips only leading C0-and-space and preserves a
+    # trailing space, so the trim must happen here or the forbidden filter
+    # would drop a real link with a stray trailing space.
+    href = href.strip(_URL_EDGE_TRIM_CHARACTERS)
+    if not href or href.startswith("#"):
+        return None
+    lowered = href.lower()
+    if any(lowered.startswith(prefix) for prefix in _SKIPPED_HREF_PREFIXES):
+        return None
+    link = urljoin(final_url, href)
+    if _host_of(link) != base_host:
+        return None
+    if any(character in _URL_FORBIDDEN_CHARACTERS for character in link):
+        return None
+    return link
 
 
 def _in_boilerplate(anchor: etree._Element) -> bool:
