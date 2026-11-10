@@ -18,27 +18,43 @@ THIN_CHARS: Final = 800
 """Below this many characters a page is too small to count as a document."""
 
 MARKER_SCAN_CHARS: Final = 3000
-"""Markers are only trusted on short texts: a long article may legitimately
-discuss logins or captchas."""
+"""General challenge and login markers are only trusted on short texts: a
+long article may legitimately discuss logins or captchas. Unambiguous
+challenge signatures (:data:`_UNAMBIGUOUS_CHALLENGE_MARKERS`) are scanned at
+any length and are not subject to this limit."""
 
-_CHALLENGE_MARKERS: Final = (
+_UNAMBIGUOUS_CHALLENGE_MARKERS: Final = (
     "verify you are human",
     "verify you are a human",
     "checking your browser",
     "just a moment",
     "enable javascript and cookies",
+    "please wait for verification",
+    "whoa there, pardner",
+    "something went wrong, but don't fret",
+)
+"""Signatures of interstitial bot-check screens, scanned on texts of any length.
+
+Each is a full phrase shown only by challenge pages (Cloudflare and friends);
+a real document almost never quotes one verbatim, while a challenge page
+without a match used to pass as ``ok`` — and a false ``ok`` gets cached, where
+a false ``challenge`` is only a warning the verdict is allowed to give. Hence
+no length limit for these."""
+
+_GENERAL_CHALLENGE_MARKERS: Final = (
     "attention required",
     "are you a robot",
     "captcha",
     "blocked by network security",
-    "whoa there, pardner",
-    "please wait for verification",
     "javascript is not available",
     "javascript is disabled",
-    "something went wrong, but don't fret",
     "підтвердьте, що ви не робот",
     "я не робот",
 )
+"""Single words and short phrases a real document may legitimately quote
+(an article *about* captchas, Cloudflare's own prose). Trusted only on texts
+up to :data:`MARKER_SCAN_CHARS`, as before, to keep long legitimate articles
+from being flagged."""
 _LOGIN_MARKERS: Final = (
     "log in to continue",
     "sign in to continue",
@@ -57,9 +73,11 @@ _LOGIN_MARKERS: Final = (
 def assess_content(text: str) -> ContentQuality:
     """Classify extracted ``text``; challenge and login markers win over thin."""
     stripped = text.strip()
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in _UNAMBIGUOUS_CHALLENGE_MARKERS):
+        return "challenge"
     if len(stripped) <= MARKER_SCAN_CHARS:
-        lowered = stripped.lower()
-        if any(marker in lowered for marker in _CHALLENGE_MARKERS):
+        if any(marker in lowered for marker in _GENERAL_CHALLENGE_MARKERS):
             return "challenge"
         if any(marker in lowered for marker in _LOGIN_MARKERS):
             return "login_wall"
