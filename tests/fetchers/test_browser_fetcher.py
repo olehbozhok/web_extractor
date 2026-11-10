@@ -222,13 +222,52 @@ async def test_public_redirect_into_blocked_body_is_ssrf_blocked() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_redirect_to_normal_200_page_carrying_the_phrase_is_fetched() -> None:
+    """docs/01, 4.2: the egress-proxy signature is a redirect with a FINAL
+    block code and the proxy body. A 302 landing on a real 200 page whose
+    text merely contains the phrase must be fetched, not cached as an
+    ssrf_blocked error for the error TTL."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=200,
+        html="<html><body>We say: URL blocked, sorry</body></html>",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, Fetched)
+    assert result.http_status.value == 200
+    assert b"URL blocked, sorry" in result.body
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_redirect_to_final_404_carrying_the_phrase_is_not_found() -> None:
+    """The same signature rule: a 302 whose FINAL code is 404 is a missing
+    page even when the body carries the proxy phrase (docs/01, 4.2)."""
+    payload = _crawl_payload(
+        status_code=302,
+        redirected_status_code=404,
+        html="<html><body>Nothing here: URL blocked, sorry</body></html>",
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
+
+    result = await _fetcher().fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "not_found"
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_genuine_403_carrying_the_phrase_stays_blocked() -> None:
     """A true 403 page that happens to contain 'URL blocked' is anti-bot,
     not the egress proxy: no redirect happened."""
     payload = _crawl_payload(
         status_code=403,
         redirected_status_code=403,
-        html="<html><body>We have blocked this URL for your safety</body></html>",
+        html="<html><body>We say: URL blocked, sorry</body></html>",
     )
     respx.post("http://crawl4ai.test:11235/crawl").mock(return_value=_answer_for(payload))
 

@@ -196,8 +196,12 @@ class BrowserFetcher:
         except OSError as exc:
             # The final host may exist only in the browser's network (spike 02,
             # 3); the proxy body then names the block more truthfully than the
-            # resolution failure would.
-            if _redirect_into_blocked_network(answer.status_code, answer.html):
+            # resolution failure would — but only with the full signature of a
+            # redirect into a block, final code included (docs/01, 4.2).
+            final_code = answer.redirected_status_code or answer.status_code
+            if final_code is not None and _redirect_into_blocked_network(
+                answer.status_code, final_code, answer.html
+            ):
                 msg = f"{request.url} was redirected by the browser into a forbidden network"
                 return FetchFailure("ssrf_blocked", msg, final_url=parsed)
             msg = f"final URL of {request.url} did not resolve: {exc}"
@@ -278,12 +282,18 @@ def _navigation_error(error_message: str | None) -> str:
     return error_message.strip().splitlines()[0][:_MAX_ERROR_EXCERPT]
 
 
-def _redirect_into_blocked_network(first_code: int | None, html: str) -> bool:
+def _redirect_into_blocked_network(first_code: int | None, final_code: int, html: str) -> bool:
     """The egress proxy's signature of a redirect into a forbidden network
-    (docs/spikes/02, 6): the FIRST status is a redirect and the body is its
-    ``URL blocked`` page. The final code alone - a genuine 403 carrying the
-    same phrase - is an ordinary block, not a forbidden network."""
-    return first_code in HTTP_REDIRECT_CODES and _SSRF_REJECTION_MARKER in html[:200]
+    (docs/01, 4.2; docs/spikes/02, 6): the FIRST status is a redirect, the
+    FINAL code is a block, and the body is the proxy's ``URL blocked`` page.
+    Without the final code a normal 200/404 page that merely carries the
+    phrase would be mistaken for a forbidden network and wrongly cached as
+    an error; a final 403 without a redirect is an ordinary anti-bot block."""
+    return (
+        first_code in HTTP_REDIRECT_CODES
+        and final_code in HTTP_BLOCKED_STATUSES
+        and _SSRF_REJECTION_MARKER in html[:200]
+    )
 
 
 def _failure_kind_for(
@@ -291,11 +301,12 @@ def _failure_kind_for(
 ) -> FetchFailureKind | None:
     """Decide the failure kind from the first and final status codes and body.
 
-    A redirect into a forbidden network shows up as a redirect status with
-    the egress proxy's ``URL blocked`` body (docs/spikes/02, 6): the final
-    code alone (403) cannot be told apart from an anti-bot block.
+    A redirect into a forbidden network shows up as a redirect status with a
+    blocking final code and the egress proxy's ``URL blocked`` body
+    (docs/spikes/02, 6): the final code alone (403) cannot be told apart
+    from an anti-bot block.
     """
-    if _redirect_into_blocked_network(first_code, html):
+    if _redirect_into_blocked_network(first_code, final_code, html):
         return "ssrf_blocked"
     if final_code in HTTP_BLOCKED_STATUSES:
         return "blocked"
