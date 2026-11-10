@@ -34,7 +34,14 @@ from web_extractor.domain.fetch import (
 )
 from web_extractor.domain.records import Event, PageRecord
 from web_extractor.domain.ttl import compute_expires_at, is_expired, parse_iso_utc, to_iso_utc
-from web_extractor.domain.types import Clock, ErrorKind, PageFormat, RenderMode, Status
+from web_extractor.domain.types import (
+    Clock,
+    ErrorKind,
+    FetcherName,
+    PageFormat,
+    RenderMode,
+    Status,
+)
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
 from web_extractor.extractors.base import Extractor
 from web_extractor.fetchers.base import Fetcher
@@ -66,9 +73,14 @@ class _RequestMetrics:
 
 @dataclass(frozen=True, slots=True)
 class _Attempt:
-    """A fetch result plus the extraction already done on it, if any."""
+    """A fetch result, the fetcher that produced it, and any extraction done on it.
+
+    ``fetcher`` is recorded for failures too: a cached failure must only
+    answer requests that would go to the same fetcher.
+    """
 
     fetch_result: FetchResult
+    fetcher: FetcherName
     extract_result: ExtractResult | None = None
 
 
@@ -207,9 +219,10 @@ class FetchService:
         """The shared work: fetch (per render mode), extract, cache write.
 
         ``render=browser`` without a browser fetcher fails with
-        ``needs_browser``. ``render=auto`` retries through the browser when
-        the static extraction found nothing or a JS-only page; if the
-        browser service itself is unavailable, the static result stands.
+        ``browser_unavailable`` (a deployment fact, never cached).
+        ``render=auto`` retries through the browser when the static
+        extraction found nothing or a JS-only page; if the browser service
+        itself is unavailable, the static result stands.
         """
         fetch_request = FetchRequest(
             url=url,
@@ -227,7 +240,8 @@ class FetchService:
         now = self._clock.now()
         previous = await self._cache.get(url.value)
         record = await self._record_from_attempt(url, attempt, now, request.page_format)
-        await self._cache.put(record)
+        if _is_cacheable(attempt.fetch_result):
+            await self._cache.put(record)
 
         if (
             previous is not None
@@ -247,19 +261,19 @@ class FetchService:
     async def _select_fetch(self, request: ServiceRequest, fetch_request: FetchRequest) -> _Attempt:
         """Choose the fetcher per render mode and run the auto fallback."""
         if request.render == "browser":
-            return _Attempt(await self._fetch_browser(fetch_request))
+            return _Attempt(await self._fetch_browser(fetch_request), "browser")
         static_result = await self._fetcher.fetch(fetch_request)
         if request.render == "static" or self._browser_fetcher is None:
-            return _Attempt(static_result)
+            return _Attempt(static_result, "http")
         if not isinstance(static_result, Fetched):
-            return _Attempt(static_result)
+            return _Attempt(static_result, "http")
         return await self._maybe_retry_in_browser(static_result, request, fetch_request)
 
     async def _fetch_browser(self, fetch_request: FetchRequest) -> FetchResult:
-        """A browser render; ``needs_browser`` when none is configured."""
+        """A browser render; ``browser_unavailable`` when none is configured."""
         if self._browser_fetcher is None:
             msg = "browser rendering is not configured on this deployment"
-            return FetchFailure("needs_browser", msg, final_url=fetch_request.url)
+            return FetchFailure("browser_unavailable", msg, final_url=fetch_request.url)
         return await self._browser_fetcher.fetch(fetch_request)
 
     async def _maybe_retry_in_browser(
@@ -276,7 +290,7 @@ class FetchService:
         """
         browser_fetcher = self._browser_fetcher
         if browser_fetcher is None:  # unreachable: the caller narrowed this
-            return _Attempt(static_result)
+            return _Attempt(static_result, "http")
         extract_result = await self._extractor.extract(
             static_result.body, static_result.final_url.value, request.page_format
         )
@@ -285,14 +299,14 @@ class FetchService:
             and extract_result.kind in ("empty", "needs_js")
         ):
             # Good (or non-JS) static result: reuse this extraction, do not repeat it.
-            return _Attempt(static_result, extract_result)
+            return _Attempt(static_result, "http", extract_result)
         browser_result = await browser_fetcher.fetch(fetch_request)
         if (
             isinstance(browser_result, FetchFailure)
             and browser_result.kind == "browser_unavailable"
         ):
-            return _Attempt(static_result, extract_result)
-        return _Attempt(browser_result)
+            return _Attempt(static_result, "http", extract_result)
+        return _Attempt(browser_result, "browser")
 
     async def _record_from_attempt(
         self,
@@ -304,7 +318,7 @@ class FetchService:
         """Build the cache entry from a fetch attempt, extracting once if needed."""
         fetch_result = attempt.fetch_result
         if isinstance(fetch_result, FetchFailure):
-            return self._failure_record(url, fetch_result, now)
+            return self._failure_record(url, fetch_result, attempt.fetcher, now)
         extract_result = attempt.extract_result
         if extract_result is None:
             extract_result = await self._extractor.extract(
@@ -396,9 +410,9 @@ class FetchService:
         )
 
     def _failure_record(
-        self, url: NormalizedUrl, failure: FetchFailure, now: datetime
+        self, url: NormalizedUrl, failure: FetchFailure, fetcher: FetcherName, now: datetime
     ) -> PageRecord:
-        """Build the cache entry for a fetch failure (shorter TTL)."""
+        """Build the cache entry for a fetch failure (shorter TTL) by ``fetcher``."""
         expires_delta = (
             timedelta(seconds=failure.retry_after_s.value)
             if failure.retry_after_s is not None
@@ -409,7 +423,7 @@ class FetchService:
             final_url=failure.final_url.value if failure.final_url is not None else url.value,
             status=_status_for_failure(failure.kind),
             http_status=failure.http_status.value if failure.http_status is not None else None,
-            fetcher="http",
+            fetcher=fetcher,
             fetched_at=to_iso_utc(now),
             expires_at=to_iso_utc(compute_expires_at(now, expires_delta)),
             content_sha256=None,
@@ -480,9 +494,25 @@ class FetchService:
 
 
 def _serves_render(cached: PageRecord, render: RenderMode) -> bool:
-    """A cached entry serves a request unless it asks for a browser render and the
-    entry came from a static fetch (a browser entry serves every mode)."""
-    return render != "browser" or cached.fetcher == "browser"
+    """Whether a cached entry may answer a request with this render mode.
+
+    A page (``ok``) from the browser serves every mode; a static page serves
+    every mode but ``browser``. A failure belongs to the fetcher that failed:
+    a browser failure answers only browser requests, so the advised retry with
+    ``render=static`` really fetches, and a static failure answers ``static``
+    and ``auto`` requests.
+    """
+    if cached.status == "ok":
+        return render != "browser" or cached.fetcher == "browser"
+    if cached.fetcher == "browser":
+        return render == "browser"
+    return render != "browser"
+
+
+def _is_cacheable(result: FetchResult) -> bool:
+    """Everything but a browser-service outage: that describes the
+    deployment, not the page, and must not outlive the outage."""
+    return not (isinstance(result, FetchFailure) and result.kind == "browser_unavailable")
 
 
 def _status_for_failure(kind: FetchFailureKind) -> Status:
@@ -494,8 +524,6 @@ def _status_for_failure(kind: FetchFailureKind) -> Status:
             return "not_found"
         case "timeout":
             return "timeout"
-        case "needs_browser":
-            return "needs_browser"
         case _:
             return "error"
 
@@ -512,7 +540,6 @@ _FAILURE_ERROR_KINDS: dict[FetchFailureKind, ErrorKind] = {
     "dns": "dns",
     "unsupported_type": "unsupported_type",
     "browser_unavailable": "browser_unavailable",
-    "needs_browser": "needs_browser",
 }
 """Fetch failure kinds mapped onto journal/agent error kinds."""
 

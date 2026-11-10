@@ -26,6 +26,9 @@ class McpHarness:
 
     url: str
     fetcher: ScriptedFetcher
+    """The static fetcher: tests reach it with ``render=static`` or ``auto``."""
+    browser_fetcher: ScriptedFetcher
+    """The browser fetcher: the default path of every tool."""
     extractor: ScriptedExtractor
     clock: FakeClock
     settings: Settings
@@ -47,9 +50,16 @@ async def mcp(tmp_path: Path) -> AsyncIterator[McpHarness]:
         global_max_concurrent=10,
     )
     fetcher = ScriptedFetcher()
+    browser_fetcher = ScriptedFetcher("browser")
     extractor = ScriptedExtractor()
     clock = FakeClock()
-    app = create_app(settings, fetcher=fetcher, extractor=extractor, clock=clock)
+    app = create_app(
+        settings,
+        fetcher=fetcher,
+        browser_fetcher=browser_fetcher,
+        extractor=extractor,
+        clock=clock,
+    )
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error"))
     thread_errors: list[BaseException] = []
 
@@ -77,6 +87,7 @@ async def mcp(tmp_path: Path) -> AsyncIterator[McpHarness]:
     harness = McpHarness(
         url=f"http://127.0.0.1:{port}/mcp",
         fetcher=fetcher,
+        browser_fetcher=browser_fetcher,
         extractor=extractor,
         clock=clock,
         settings=settings,

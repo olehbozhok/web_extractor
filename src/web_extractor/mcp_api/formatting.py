@@ -3,10 +3,12 @@
 The text block is a short ``key: value`` header followed by the page body
 fenced between untrusted-content markers; ``structuredContent`` carries the
 same metadata without the body, so clients that forward both never pay for
-the body twice. Errors use ``ERROR <kind>: <what>. <what to do>``.
+the body twice. Errors use ``ERROR <kind>: <what>. <what to do>``; when
+switching fetchers may help, ``<what to do>`` starts with the render mode to
+retry with, chosen from the fetcher that failed (docs/03, section 5).
 """
 
-from web_extractor.domain.types import ErrorKind
+from web_extractor.domain.types import ErrorKind, FetcherName, RenderMode
 
 _BEGIN_MARKER = "--- BEGIN UNTRUSTED PAGE CONTENT ---"
 _END_MARKER = "--- END UNTRUSTED PAGE CONTENT ---"
@@ -15,19 +17,19 @@ _ADVICE: dict[ErrorKind, str] = {
     "invalid_argument": "Fix the named parameter and call again.",
     "ssrf_blocked": "The address is private or forbidden by design; do not retry it.",
     "blocked": (
-        "Try render=browser if available; if that fails, open the URL with "
-        "another tool. For 429, do not retry before Retry-After."
+        "The site refused the request; if a retry does not help, open the URL "
+        "with another tool. For 429, do not retry before Retry-After."
     ),
     "not_found": "Check the URL, look for an archived copy or another source.",
-    "timeout": "Retry once; if the page was browser-rendered, try render=static.",
-    "needs_browser": "Repeat with render=browser if available.",
+    "timeout": "Retry once.",
+    "needs_browser": "The page has no extractable text without JavaScript.",
     "too_large": "The page is too large for text extraction; use another source.",
     "dns": "The host name does not resolve; check the spelling of the domain.",
     "network": "Connection failed; retry once, then try another source.",
     "unsupported_type": (
         "The content type (image, archive, media) cannot be turned into text; use another source."
     ),
-    "browser_unavailable": "Retry later, or use render=static.",
+    "browser_unavailable": "The browser service is down; retry later.",
     "unknown_cursor": "Repeat fetch_page with the same URL.",
     "stale_cursor": "The page changed; repeat fetch_page with the same URL.",
     "internal": "Report the error; the message intentionally hides details.",
@@ -35,12 +37,52 @@ _ADVICE: dict[ErrorKind, str] = {
     "redirect_error": "The site loops redirects; give up on this URL.",
     "content_changed": "Journal-only event; never shown to agents.",
 }
-"""Advice per error kind (docs/03, section 5)."""
+"""Advice per error kind, independent of the fetcher (docs/03, section 5)."""
+
+_RETRY_STATIC_AFTER_BROWSER: frozenset[ErrorKind] = frozenset(
+    {"blocked", "timeout", "network", "server_error", "browser_unavailable"}
+)
+"""Browser failures a plain HTTP fetch may not share: anti-bot rules that
+target Chromium, slow scripts, downloads (PDF) Chromium does not open."""
+
+_RETRY_BROWSER_AFTER_STATIC: frozenset[ErrorKind] = frozenset({"blocked", "needs_browser"})
+"""Static failures a real browser may get past: plain-client blocks, JS-only pages."""
+
+_RETRY_HINT: dict[RenderMode, str] = {
+    "static": (
+        "Retry once with render=static (plain HTTP; the only way to get PDFs and "
+        "other downloads, which the browser does not open)."
+    ),
+    "browser": "Retry once with render=browser if available.",
+}
 
 
-def error_text(kind: ErrorKind, message: str) -> str:
-    """The single-line error text sent as the tool's content."""
+def retry_render(kind: ErrorKind, fetcher: FetcherName | None) -> RenderMode | None:
+    """The render mode worth one retry after a failure, or ``None``.
+
+    ``fetcher`` is the fetcher whose attempt failed (``None`` when no fetch
+    happened, e.g. rejected arguments). The advice always switches to the
+    other fetcher; failures that do not depend on the fetcher (404, DNS,
+    forbidden address) get none.
+    """
+    match fetcher:
+        case "browser":
+            return "static" if kind in _RETRY_STATIC_AFTER_BROWSER else None
+        case "http":
+            return "browser" if kind in _RETRY_BROWSER_AFTER_STATIC else None
+        case None:
+            return None
+
+
+def error_text(kind: ErrorKind, message: str, fetcher: FetcherName | None) -> str:
+    """The single-line error text sent as the tool's content.
+
+    ``fetcher`` is the fetcher that failed; it decides the retry advice.
+    """
     advice = _ADVICE.get(kind, _ADVICE["internal"])
+    mode = retry_render(kind, fetcher)
+    if mode is not None:
+        advice = f"{_RETRY_HINT[mode]} {advice}"
     return f"ERROR {kind}: {message}. {advice}"
 
 

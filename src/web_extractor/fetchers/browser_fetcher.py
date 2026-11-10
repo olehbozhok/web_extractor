@@ -8,13 +8,17 @@ heuristic marks real small responses (even 404/403 bodies) as
 ``success=false``. Status is therefore decided by
 ``redirected_status_code`` and the body only.
 
-The core re-checks SSRF on the final URL (resolve + domain rules): the
-browser's own egress proxy is the first line of defense, not the only
-one (docs/spikes/02, conclusions 1-2).
+Before calling Crawl4AI the core applies the same pre-flight rules as the
+static fetcher (port allow-list, resolve, SSRF check of every address), so
+an unresolvable or private start URL fails as ``dns``/``ssrf_blocked``
+instead of Crawl4AI's opaque ``400 URL blocked``. After the render the core
+re-checks SSRF on the final URL: the browser's own egress proxy is the first
+line of defense, not the only one (docs/spikes/02, conclusions 1-2).
 """
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -37,11 +41,20 @@ from web_extractor.domain.types import (
     HttpStatus,
 )
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
-from web_extractor.fetchers.base import Resolver
+from web_extractor.fetchers.base import Resolver, port_failure
 
 _BROWSER_UNAVAILABLE_NOTE = "browser service unreachable"
 
 _MAX_CONCURRENT_FLOOR = 1
+
+_HTTP_BAD_REQUEST = 400
+_SSRF_REJECTION_MARKER = "URL blocked"
+"""Crawl4AI's own SSRF guard answers 400 with this text in ``detail``."""
+
+_CHROMIUM_NET_ERROR = re.compile(r"net::ERR_[A-Z0-9_]+")
+"""Chromium's navigation error code inside Crawl4AI's ``error_message``."""
+
+_MAX_ERROR_EXCERPT = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +69,8 @@ class BrowserFetcherConfig:
     """Passed in every /crawl request (docs/01, 4.2)."""
     max_concurrent: int
     """Must be lower than Crawl4AI's pool.max_pages (docs/spikes/02)."""
+    allowed_ports: tuple[int, ...]
+    """The same port allow-list as the static fetcher (SSRF, section 7)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +82,8 @@ class _CrawlAnswer:
     redirected_status_code: int | None
     redirected_url: str | None
     response_headers: dict[str, str]
+    error_message: str | None
+    """Crawl4AI's failure text; carries Chromium's ``net::ERR_*`` code."""
 
 
 class BrowserFetcher:
@@ -87,9 +104,34 @@ class BrowserFetcher:
         self._semaphore = asyncio.Semaphore(config.max_concurrent)
 
     async def fetch(self, request: FetchRequest) -> FetchResult:
-        """Render ``request.url`` in the browser; failures are values."""
+        """Render ``request.url`` in the browser; failures are values.
+
+        Expected failures: ``ssrf_blocked`` and ``dns`` from the pre-flight
+        checks (no browser call is made), ``blocked``/``not_found``/
+        ``server_error`` from the final status, ``network`` when Chromium
+        could not load the URL (e.g. a PDF download), ``browser_unavailable``
+        when Crawl4AI itself is unreachable or answers garbage.
+        """
+        preflight = await self._preflight(request.url)
+        if preflight is not None:
+            return preflight
         async with self._semaphore:
             return await self._fetch_locked(request)
+
+    async def _preflight(self, url: NormalizedUrl) -> FetchFailure | None:
+        """Port allow-list, resolution and SSRF rules for the start URL."""
+        bad_port = port_failure(url, self._config.allowed_ports)
+        if bad_port is not None:
+            return bad_port
+        try:
+            violation = await self._check_host(url)
+        except OSError as exc:
+            msg = f"DNS resolution failed for {url.host!r}: {exc}"
+            return FetchFailure("dns", msg, final_url=url)
+        if violation is not None:
+            msg = f"{url} resolves to forbidden address (rule: {violation.rule})"
+            return FetchFailure("ssrf_blocked", msg, final_url=url)
+        return None
 
     async def _fetch_locked(self, request: FetchRequest) -> FetchResult:
         body = {
@@ -119,6 +161,9 @@ class BrowserFetcher:
                         "Content-Type": "application/json",
                     },
                 )
+                if _is_ssrf_rejection(response):
+                    msg = f"browser service refused {request.url} as a forbidden address"
+                    return FetchFailure("ssrf_blocked", msg, final_url=request.url)
                 response.raise_for_status()
                 payload: object = response.json()
         except (httpx.HTTPError, ValueError) as exc:
@@ -141,14 +186,18 @@ class BrowserFetcher:
         if isinstance(parsed, UrlParseError):
             msg = f"browser returned a malformed final URL {final_url!r}: {parsed.message}"
             return FetchFailure("redirect_error", msg, final_url=request.url)
-        violation = await self._check_final_url(parsed)
+        bad_port = port_failure(parsed, self._config.allowed_ports)
+        if bad_port is not None:
+            return bad_port
+        violation = await self._check_host(parsed)
         if violation is not None:
             msg = f"{parsed} resolves to forbidden address (rule: {violation.rule})"
             return FetchFailure("ssrf_blocked", msg, final_url=request.url)
 
         code = answer.redirected_status_code or answer.status_code
         if code is None:
-            msg = f"browser returned no status code for {request.url}"
+            reason = _navigation_error(answer.error_message)
+            msg = f"browser could not load {request.url}: {reason}"
             return FetchFailure("network", msg, final_url=parsed)
         status = HttpStatus(code)
         kind = _failure_kind_for(code, answer.html)
@@ -164,18 +213,39 @@ class BrowserFetcher:
             fetcher="browser",
         )
 
-    async def _check_final_url(self, url: NormalizedUrl) -> SsrfViolation | None:
-        """Resolve the final URL's host once and apply the SSRF rules."""
+    async def _check_host(self, url: NormalizedUrl) -> SsrfViolation | None:
+        """Resolve the URL's host once and apply the SSRF rules to every address.
+
+        Resolution failures propagate as ``OSError`` with the URL in the text.
+        """
         try:
             addresses = await self._resolver.resolve(url.host)
         except OSError as exc:
-            msg = f"final URL {url} did not resolve: {exc}"
+            msg = f"{url} did not resolve: {exc}"
             raise OSError(msg) from exc
         for address in addresses:
             violation = check_address(address)
             if violation is not None:
                 return violation
         return None
+
+
+def _is_ssrf_rejection(response: httpx.Response) -> bool:
+    """Crawl4AI's own SSRF guard: ``400 {"detail": "URL blocked ..."}``."""
+    return (
+        response.status_code == _HTTP_BAD_REQUEST
+        and _SSRF_REJECTION_MARKER in response.text[:_MAX_ERROR_EXCERPT]
+    )
+
+
+def _navigation_error(error_message: str | None) -> str:
+    """Chromium's ``net::ERR_*`` code, else the first line of Crawl4AI's text."""
+    if error_message is None or not error_message.strip():
+        return "no status code and no error message"
+    found = _CHROMIUM_NET_ERROR.search(error_message)
+    if found is not None:
+        return found.group(0)
+    return error_message.strip().splitlines()[0][:_MAX_ERROR_EXCERPT]
 
 
 def _failure_kind_for(code: int, html: str) -> FetchFailureKind | None:
@@ -222,6 +292,7 @@ def _parse_crawl_answer(payload: object) -> _CrawlAnswer | None:
         redirected_status_code=_opt_int(first, "redirected_status_code"),
         redirected_url=_opt_str(first, "redirected_url"),
         response_headers=headers,
+        error_message=_opt_str(first, "error_message"),
     )
 
 

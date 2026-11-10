@@ -73,13 +73,15 @@ def create_app(
     settings: Settings,
     *,
     fetcher: Fetcher | None = None,
+    browser_fetcher: Fetcher | None = None,
     extractor: Extractor | None = None,
     clock: Clock | None = None,
 ) -> FastAPI:
     """Build the FastAPI app with the MCP ASGI app mounted at /mcp.
 
-    ``fetcher`` and ``clock`` exist for tests; production passes nothing
-    and gets the real HTTP fetcher and system clock.
+    ``fetcher``, ``browser_fetcher``, ``extractor`` and ``clock`` exist for
+    tests; production passes nothing and gets the real HTTP fetcher, the
+    Crawl4AI fetcher when settings configure it, and the system clock.
     """
     app = FastAPI(title="web_extractor", lifespan=_lifespan, docs_url=None, redoc_url=None)
     database = Database(settings.db_path)
@@ -102,18 +104,20 @@ def create_app(
         },
         global_max_concurrent=settings.global_max_concurrent,
     )
-    browser_fetcher = (
-        BrowserFetcher(
-            config=BrowserFetcherConfig(
-                base_url=settings.browser_base_url,
-                token=settings.browser_token,
-                page_timeout_ms=settings.browser_page_timeout_ms,
-                max_concurrent=settings.browser_max_concurrent,
-            ),
-            clock=service_clock,
-            resolver=SystemResolver(),
+    browser_config = (
+        BrowserFetcherConfig(
+            base_url=settings.browser_base_url,
+            token=settings.browser_token,
+            page_timeout_ms=settings.browser_page_timeout_ms,
+            max_concurrent=settings.browser_max_concurrent,
+            allowed_ports=tuple(settings.allowed_ports),
         )
         if settings.browser_base_url and settings.browser_token
+        else None
+    )
+    real_browser_fetcher = browser_fetcher or (
+        BrowserFetcher(config=browser_config, clock=service_clock, resolver=SystemResolver())
+        if browser_config is not None
         else None
     )
     real_fetcher = fetcher or HttpFetcher(
@@ -133,7 +137,7 @@ def create_app(
     service = FetchService(
         FetchServiceDeps(
             fetcher=real_fetcher,
-            browser_fetcher=browser_fetcher,
+            browser_fetcher=real_browser_fetcher,
             extractor=real_extractor,
             cache=cache_repository,
             events=EventRepository(database),
@@ -157,16 +161,7 @@ def create_app(
     )
     app.state.clock = service_clock
     app.state.browser_health = (
-        BrowserHealthProbe(
-            BrowserFetcherConfig(
-                base_url=settings.browser_base_url,
-                token=settings.browser_token,
-                page_timeout_ms=settings.browser_page_timeout_ms,
-                max_concurrent=settings.browser_max_concurrent,
-            )
-        )
-        if browser_fetcher is not None
-        else None
+        BrowserHealthProbe(browser_config) if browser_config is not None else None
     )
 
     server: MCPServer[object] = MCPServer(
