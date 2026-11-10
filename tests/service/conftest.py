@@ -41,7 +41,7 @@ async def _build_harness(tmp_path: Path, *, with_browser: bool) -> ServiceHarnes
     database = Database(str(tmp_path / "service.db"))
     await database.connect()
     fetcher = ScriptedFetcher()
-    browser_fetcher = ScriptedFetcher()
+    browser_fetcher = ScriptedFetcher("browser")
     extractor = ScriptedExtractor()
     clock = FakeClock()
     limiter = DomainLimiter(

@@ -73,13 +73,15 @@ def create_app(
     settings: Settings,
     *,
     fetcher: Fetcher | None = None,
+    browser_fetcher: Fetcher | None = None,
     extractor: Extractor | None = None,
     clock: Clock | None = None,
 ) -> FastAPI:
     """Build the FastAPI app with the MCP ASGI app mounted at /mcp.
 
-    ``fetcher`` and ``clock`` exist for tests; production passes nothing
-    and gets the real HTTP fetcher and system clock.
+    ``fetcher``, ``browser_fetcher``, ``extractor`` and ``clock`` exist for
+    tests; production passes nothing and gets the real HTTP fetcher, the
+    Crawl4AI fetcher when settings configure it, and the system clock.
     """
     app = FastAPI(title="web_extractor", lifespan=_lifespan, docs_url=None, redoc_url=None)
     database = Database(settings.db_path)
@@ -113,7 +115,7 @@ def create_app(
         if settings.browser_base_url and settings.browser_token
         else None
     )
-    browser_fetcher = (
+    real_browser_fetcher = browser_fetcher or (
         BrowserFetcher(config=browser_config, clock=service_clock, resolver=SystemResolver())
         if browser_config is not None
         else None
@@ -135,7 +137,7 @@ def create_app(
     service = FetchService(
         FetchServiceDeps(
             fetcher=real_fetcher,
-            browser_fetcher=browser_fetcher,
+            browser_fetcher=real_browser_fetcher,
             extractor=real_extractor,
             cache=cache_repository,
             events=EventRepository(database),

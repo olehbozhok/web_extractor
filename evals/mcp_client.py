@@ -23,13 +23,20 @@ from evals.pages import BLOCKED_URL, FIXTURE_PAGES, GONE_URL
 from mcp import ClientSession
 from web_extractor.config import Settings
 from web_extractor.domain.fetch import Fetched, FetchFailure, FetchRequest, FetchResult
-from web_extractor.domain.types import HttpStatus
+from web_extractor.domain.types import FetcherName, HttpStatus
 from web_extractor.extractors.trafilatura_extractor import TrafilaturaExtractor
 from web_extractor.mcp_api.app import create_app
 
 
 class FixtureFetcher:
-    """Serves the deterministic evaluation pages instead of the network."""
+    """Serves the deterministic evaluation pages instead of the network.
+
+    One instance stands in for each real fetcher; ``name`` is stamped on the
+    pages it serves, as the real fetchers do.
+    """
+
+    def __init__(self, name: FetcherName) -> None:
+        self._name: FetcherName = name
 
     async def fetch(self, request: FetchRequest) -> FetchResult:
         url = request.url.value
@@ -50,7 +57,7 @@ class FixtureFetcher:
             headers={},
             body=html.encode("utf-8"),
             fetched_at=datetime(2026, 11, 9, 12, 0, 0, tzinfo=UTC),
-            fetcher="http",
+            fetcher=self._name,
         )
 
 
@@ -122,7 +129,11 @@ async def evaluation_server(
         global_max_concurrent=10,
     )
     app = create_app(
-        settings, fetcher=FixtureFetcher(), extractor=TrafilaturaExtractor(), clock=RealClock()
+        settings,
+        fetcher=FixtureFetcher("http"),
+        browser_fetcher=FixtureFetcher("browser"),
+        extractor=TrafilaturaExtractor(),
+        clock=RealClock(),
     )
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)

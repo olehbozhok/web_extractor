@@ -219,9 +219,10 @@ class FetchService:
         """The shared work: fetch (per render mode), extract, cache write.
 
         ``render=browser`` without a browser fetcher fails with
-        ``needs_browser``. ``render=auto`` retries through the browser when
-        the static extraction found nothing or a JS-only page; if the
-        browser service itself is unavailable, the static result stands.
+        ``browser_unavailable`` (a deployment fact, never cached).
+        ``render=auto`` retries through the browser when the static
+        extraction found nothing or a JS-only page; if the browser service
+        itself is unavailable, the static result stands.
         """
         fetch_request = FetchRequest(
             url=url,
@@ -269,10 +270,10 @@ class FetchService:
         return await self._maybe_retry_in_browser(static_result, request, fetch_request)
 
     async def _fetch_browser(self, fetch_request: FetchRequest) -> FetchResult:
-        """A browser render; ``needs_browser`` when none is configured."""
+        """A browser render; ``browser_unavailable`` when none is configured."""
         if self._browser_fetcher is None:
             msg = "browser rendering is not configured on this deployment"
-            return FetchFailure("needs_browser", msg, final_url=fetch_request.url)
+            return FetchFailure("browser_unavailable", msg, final_url=fetch_request.url)
         return await self._browser_fetcher.fetch(fetch_request)
 
     async def _maybe_retry_in_browser(
@@ -523,8 +524,6 @@ def _status_for_failure(kind: FetchFailureKind) -> Status:
             return "not_found"
         case "timeout":
             return "timeout"
-        case "needs_browser":
-            return "needs_browser"
         case _:
             return "error"
 
@@ -541,7 +540,6 @@ _FAILURE_ERROR_KINDS: dict[FetchFailureKind, ErrorKind] = {
     "dns": "dns",
     "unsupported_type": "unsupported_type",
     "browser_unavailable": "browser_unavailable",
-    "needs_browser": "needs_browser",
 }
 """Fetch failure kinds mapped onto journal/agent error kinds."""
 

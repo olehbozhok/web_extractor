@@ -51,7 +51,7 @@ async def test_tools_list_shape_and_annotations(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_page_truncates_and_read_more_completes(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG_TEXT, page_format="markdown"))
 
     async with (
@@ -100,7 +100,7 @@ async def test_unknown_cursor_error(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_stale_cursor_after_fresh_refetch(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("version one text", page_format="markdown"))
     async with (
         streamable_http_client(mcp.url) as (read, write),
@@ -110,7 +110,7 @@ async def test_stale_cursor_after_fresh_refetch(mcp: McpHarness) -> None:
         first = await session.call_tool("fetch_page", {"url": _URL, "max_chars": 5})
         cursor = first.structured_content["cursor"]
 
-        mcp.fetcher.script(fetched_ok(normalized(_URL)))
+        mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
         mcp.extractor.script(extracted("version two text is different", page_format="markdown"))
         await session.call_tool("fetch_page", {"url": _URL, "max_chars": 5, "fresh": True})
 
@@ -123,7 +123,7 @@ async def test_stale_cursor_after_fresh_refetch(mcp: McpHarness) -> None:
 @pytest.mark.asyncio
 async def test_find_in_page_verbatim_and_normalized(mcp: McpHarness) -> None:
     page_text = "She said \u201chello \u2014 world\u201d at dawn."
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(page_text, page_format="text"))
 
     async with (
@@ -145,7 +145,7 @@ async def test_find_in_page_verbatim_and_normalized(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_find_in_page_no_matches_message(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("nothing relevant here", page_format="text"))
 
     async with (
@@ -165,9 +165,9 @@ async def test_find_in_page_no_matches_message(mcp: McpHarness) -> None:
 async def test_check_urls_order_and_summary(mcp: McpHarness) -> None:
     first_url = "https://a.test/one"
     second_url = "https://b.test/two"
-    mcp.fetcher.script(fetched_ok(normalized(first_url)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(first_url)))
     mcp.extractor.script(extracted("alpha text", page_format="text"))
-    mcp.fetcher.script(fetched_blocked(normalized(second_url)))
+    mcp.browser_fetcher.script(fetched_blocked(normalized(second_url)))
 
     async with (
         streamable_http_client(mcp.url) as (read, write),
@@ -240,7 +240,7 @@ async def test_out_of_range_args_rejected_by_schema_without_journal(mcp: McpHarn
 
 @pytest.mark.asyncio
 async def test_agent_id_from_header_when_param_absent(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("some text", page_format="markdown"))
     http_client = create_mcp_http_client(headers={"X-Agent-Id": "header-agent"})
 
@@ -272,3 +272,31 @@ async def test_healthz_and_readyz(mcp: McpHarness) -> None:
     assert health.json() == {"status": "ok"}
     assert ready.status_code == 200
     assert ready.json() == {"database": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("fetch_page", {"url": "https://site.test/default"}),
+        ("find_in_page", {"url": "https://site.test/default", "query": "body"}),
+        ("check_urls", {"urls": ["https://site.test/default"]}),
+    ],
+)
+async def test_every_page_tool_renders_in_the_browser_by_default(
+    mcp: McpHarness, tool: str, arguments: dict[str, object]
+) -> None:
+    mcp.browser_fetcher.script(fetched_ok(normalized("https://site.test/default")))
+    mcp.extractor.script(extracted("The rendered body text."))
+
+    async with (
+        streamable_http_client(mcp.url) as (read, write),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
+        result = await session.call_tool(tool, arguments)
+
+    assert result.is_error is False
+    assert len(mcp.browser_fetcher.calls) == 1
+    assert mcp.browser_fetcher.calls[0].render == "browser"
+    assert mcp.fetcher.calls == []

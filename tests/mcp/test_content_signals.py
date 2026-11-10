@@ -32,7 +32,7 @@ async def _call(mcp: McpHarness, tool: str, arguments: dict[str, object]) -> Cal
 
 @pytest.mark.asyncio
 async def test_fetch_page_reports_content_verdict(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("Instagram. Log in to continue.", page_format="markdown"))
 
     result = await _call(mcp, "fetch_page", {"url": _URL})
@@ -44,7 +44,7 @@ async def test_fetch_page_reports_content_verdict(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_real_article_is_content_ok(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
 
     result = await _call(mcp, "fetch_page", {"url": _URL})
@@ -54,7 +54,7 @@ async def test_real_article_is_content_ok(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_find_in_page_structured_matches_carry_context(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("before the needle after", page_format="text"))
 
     result = await _call(mcp, "find_in_page", {"url": _URL, "query": "needle", "context_chars": 7})
@@ -66,7 +66,7 @@ async def test_find_in_page_structured_matches_carry_context(mcp: McpHarness) ->
 
 @pytest.mark.asyncio
 async def test_dns_failure_has_its_own_error_kind(mcp: McpHarness) -> None:
-    mcp.fetcher.script(FetchFailure("dns", "no such host", final_url=normalized(_URL)))
+    mcp.browser_fetcher.script(FetchFailure("dns", "no such host", final_url=normalized(_URL)))
 
     result = await _call(mcp, "fetch_page", {"url": _URL})
 
@@ -78,7 +78,7 @@ async def test_dns_failure_has_its_own_error_kind(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_unsupported_type_has_its_own_error_kind(mcp: McpHarness) -> None:
-    mcp.fetcher.script(
+    mcp.browser_fetcher.script(
         FetchFailure("unsupported_type", "application/zip", final_url=normalized(_URL))
     )
 
@@ -89,13 +89,13 @@ async def test_unsupported_type_has_its_own_error_kind(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_check_urls_deduplicates_and_reports_version_and_verdict(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("tiny", page_format="text"))
 
     result = await _call(mcp, "check_urls", {"urls": [_URL, _URL, f"{_URL}#frag"]})
 
     text = _text_of(result)
-    assert len(mcp.fetcher.calls) == 1
+    assert len(mcp.browser_fetcher.calls) == 1
     assert "2 duplicate" in text
     assert "content=thin" in text
     assert "text_version=" in text
@@ -108,7 +108,7 @@ async def test_check_urls_deduplicates_and_reports_version_and_verdict(mcp: McpH
 
 @pytest.mark.asyncio
 async def test_check_urls_and_fetch_page_agree_on_length_and_version(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
     page = await _call(mcp, "fetch_page", {"url": _URL})
 
@@ -124,7 +124,7 @@ async def test_check_urls_and_fetch_page_agree_on_length_and_version(mcp: McpHar
 
 @pytest.mark.asyncio
 async def test_version_headers_name_their_format(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
     mcp.extractor.script(extracted(_LONG, page_format="text"))
 
@@ -139,7 +139,7 @@ async def test_version_headers_name_their_format(mcp: McpHarness) -> None:
 async def test_find_in_page_is_case_insensitive_by_default_and_reports_total(
     mcp: McpHarness,
 ) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("ПФЖ; ПФЖ; пфж.", page_format="text"))
 
     result = await _call(mcp, "find_in_page", {"url": _URL, "query": "пфж", "max_matches": 2})
@@ -153,7 +153,7 @@ async def test_find_in_page_is_case_insensitive_by_default_and_reports_total(
 
 @pytest.mark.asyncio
 async def test_case_sensitive_search_is_still_available(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("ПФЖ; ПФЖ; пфж.", page_format="text"))
 
     result = await _call(mcp, "find_in_page", {"url": _URL, "query": "пфж", "ignore_case": False})
@@ -165,7 +165,7 @@ async def test_case_sensitive_search_is_still_available(mcp: McpHarness) -> None
 @pytest.mark.asyncio
 async def test_read_more_keeps_page_metadata(mcp: McpHarness) -> None:
     metadata = PageMetadata(title="Long story", author="A. Writer")
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
     first = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
     assert first.structured_content is not None
@@ -180,7 +180,7 @@ async def test_read_more_keeps_page_metadata(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_find_in_page_can_search_markdown_and_names_the_mode(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted("A **bold** claim about the budget.", page_format="markdown"))
 
     result = await _call(
@@ -203,7 +203,7 @@ async def test_document_kind_is_sniffed_and_declared_type_shown_when_detailed(
     """A PDF served as text/html: document says pdf, content_type shows the label."""
     fetched = fetched_ok(normalized(_URL), b"%PDF-1.4 fake body")
     mislabeled = replace(fetched, headers={"Content-Type": "text/html; charset=utf-8"})
-    mcp.fetcher.script(mislabeled)
+    mcp.browser_fetcher.script(mislabeled)
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
 
     concise = await _call(mcp, "fetch_page", {"url": _URL})
@@ -220,7 +220,7 @@ async def test_document_kind_is_sniffed_and_declared_type_shown_when_detailed(
 
 @pytest.mark.asyncio
 async def test_check_urls_rows_carry_the_document_kind(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
 
     result = await _call(mcp, "check_urls", {"urls": [_URL]})
@@ -233,7 +233,7 @@ async def test_check_urls_rows_carry_the_document_kind(mcp: McpHarness) -> None:
 @pytest.mark.asyncio
 async def test_structured_publication_date_is_shown_with_its_source(mcp: McpHarness) -> None:
     metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="json_ld")
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
 
     page = await _call(mcp, "fetch_page", {"url": _URL, "max_chars": 100})
@@ -248,7 +248,7 @@ async def test_structured_publication_date_is_shown_with_its_source(mcp: McpHarn
 
 @pytest.mark.asyncio
 async def test_no_date_line_without_a_structured_date(mcp: McpHarness) -> None:
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
 
     page = await _call(mcp, "fetch_page", {"url": _URL})
@@ -261,7 +261,7 @@ async def test_no_date_line_without_a_structured_date(mcp: McpHarness) -> None:
 @pytest.mark.asyncio
 async def test_every_page_reporting_tool_gives_the_date_the_same_way(mcp: McpHarness) -> None:
     metadata = PageMetadata(title="T", published_at="2026-03-01", published_source="meta")
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(Extracted(text=_LONG, format="markdown", metadata=metadata))
     mcp.extractor.script(Extracted(text=_LONG, format="text", metadata=metadata))
 
@@ -280,7 +280,7 @@ async def test_every_page_reporting_tool_gives_the_date_the_same_way(mcp: McpHar
 @pytest.mark.asyncio
 async def test_check_urls_root_has_no_page_fields(mcp: McpHarness) -> None:
     """Page fields live in url_rows; the root never shows a null in their place."""
-    mcp.fetcher.script(fetched_ok(normalized(_URL)))
+    mcp.browser_fetcher.script(fetched_ok(normalized(_URL)))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
 
     result = await _call(mcp, "check_urls", {"urls": [_URL, _URL]})
@@ -299,7 +299,7 @@ async def test_check_urls_root_has_no_page_fields(mcp: McpHarness) -> None:
 
 @pytest.mark.asyncio
 async def test_error_root_carries_only_error_fields(mcp: McpHarness) -> None:
-    mcp.fetcher.script(FetchFailure("dns", "no such host", final_url=normalized(_URL)))
+    mcp.browser_fetcher.script(FetchFailure("dns", "no such host", final_url=normalized(_URL)))
 
     result = await _call(mcp, "fetch_page", {"url": _URL})
 

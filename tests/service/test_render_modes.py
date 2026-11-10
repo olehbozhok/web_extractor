@@ -1,5 +1,6 @@
 """render=auto / render=browser pipeline behavior (S6)."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -15,17 +16,31 @@ _BODY = b"<html><body>app shell</body></html>"
 
 
 @pytest.mark.asyncio
-async def test_render_browser_without_fetcher_is_needs_browser(tmp_path: Path) -> None:
-    """No browser fetcher configured: an explicit browser render says so."""
+async def test_render_browser_without_fetcher_is_browser_unavailable(tmp_path: Path) -> None:
+    """No browser configured is a deployment fact, not a page that needs JS.
+
+    It must not be cached either: the same URL succeeds once a browser is
+    wired, and the static path stays untouched.
+    """
     harness = await _build_harness(tmp_path, with_browser=False)
     try:
-        result = await harness.service.fetch(
-            service_request(_URL, fresh=True, render="browser", page_format="text")
+        first = await harness.service.fetch(
+            service_request(_URL, render="browser", page_format="text")
+        )
+        harness.fetcher.script(fetched_ok(normalized(_URL)))
+        harness.extractor.script(
+            Extracted(text="static text", format="text", metadata=PageMetadata())
+        )
+        static = await harness.service.fetch(
+            service_request(_URL, render="static", page_format="text")
         )
     finally:
         await harness.database.close()
-    assert result.status == "needs_browser"
-    assert result.error_kind == "needs_browser"
+    assert first.status == "error"
+    assert first.error_kind == "browser_unavailable"
+    assert first.fetcher == "browser"
+    assert "not configured" in (first.error_message or "")
+    assert static.status == "ok"
 
 
 @pytest.mark.asyncio
@@ -218,3 +233,32 @@ async def test_failure_events_name_the_fetcher_that_failed(
 
     assert rows[-1]["fetcher"] == "browser"
     assert rows[-1]["status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_browser_renders_respect_the_per_host_limit(browser_harness: ServiceHarness) -> None:
+    """Browser fetches go through the same per-host cap (2 in the harness)."""
+    urls = [f"https://site.test/page-{number}" for number in range(3)]
+    browser = browser_harness.browser_fetcher
+    browser.gated = True
+    browser.script(*(fetched_ok(normalized(url)) for url in urls))
+    browser_harness.extractor.script(
+        *(Extracted(text="rendered", format="text", metadata=PageMetadata()) for _ in urls)
+    )
+
+    tasks = [
+        asyncio.create_task(
+            browser_harness.service.fetch(service_request(url, fresh=True, render="browser"))
+        )
+        for url in urls
+    ]
+    await browser.entered.wait()
+    for _ in range(20):  # let every task run up to its first real wait
+        await asyncio.sleep(0)
+    in_browser_while_gated = len(browser.calls)
+    browser.release.set()
+    outcomes = await asyncio.gather(*tasks)
+
+    assert in_browser_while_gated == 2
+    assert [outcome.status for outcome in outcomes] == ["ok", "ok", "ok"]
+    assert len(browser.calls) == 3
