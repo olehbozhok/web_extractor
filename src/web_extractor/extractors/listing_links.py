@@ -36,6 +36,14 @@ headline), so anchors inside these are never listed."""
 _BOILERPLATE_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA roles marking the same boilerplate on tag-less containers."""
 
+_URL_FORBIDDEN_CHARACTERS = frozenset(chr(code) for code in range(0x21)) | {"\x7f"}
+"""Whitespace and control characters: a URL carrying any of them is dropped.
+``urljoin`` preserves raw newlines taken from numeric references in an href,
+and a link printed into the fenced listing section could forge its markers
+or break the "link is the text after the last `` — ``" reading rule. Hrefs
+with such characters are malformed for HTTP anyway, and the field is
+best-effort by design."""
+
 
 def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
     """Collect same-site anchor links from ``html``, in document order.
@@ -47,7 +55,8 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
     navigation boilerplate (a ``nav``/``header``/``footer``/``aside`` ancestor
     or an ancestor with a ``navigation``/``banner``/``contentinfo`` role), its
     whitespace-normalized text is 3..200 characters long and carries at least
-    one letter (which filters out dates, counters and icons). Duplicates of
+    one letter (which filters out dates, counters and icons), and the resolved
+    URL carries no whitespace or control characters. Duplicates of
     ``(name, link)`` keep their first occurrence; at most ``LISTING_LINKS_MAX``
     links are returned. Unparseable HTML yields ``()``.
     """
@@ -71,6 +80,8 @@ def extract_listing_links(html: bytes, final_url: str) -> tuple[LinkItem, ...]:
             continue
         link = urljoin(final_url, href)
         if _host_of(link) != base_host:
+            continue
+        if any(character in _URL_FORBIDDEN_CHARACTERS for character in link):
             continue
         if _in_boilerplate(anchor):
             continue
