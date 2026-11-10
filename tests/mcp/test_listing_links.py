@@ -33,8 +33,9 @@ async def _call(mcp: McpHarness, tool: str, arguments: dict[str, object]) -> Cal
 
 
 @pytest.mark.asyncio
-async def test_first_chunk_carries_sanitized_listing_links(mcp: McpHarness) -> None:
-    """Same-site links only; the astral emoji in the anchor text becomes U+FFFD."""
+async def test_first_chunk_carries_listing_links_unchanged(mcp: McpHarness) -> None:
+    """Same-site links only; anchor text reaches the response as it is on the
+    page: astral characters are not replaced (docs/03, no-sanitization)."""
     mcp.browser_fetcher.script(fetched_ok(normalized(_URL), _PAGE_BODY))
     mcp.extractor.script(extracted(_LONG, page_format="markdown"))
 
@@ -42,7 +43,7 @@ async def test_first_chunk_carries_sanitized_listing_links(mcp: McpHarness) -> N
 
     assert result.structured_content is not None
     assert result.structured_content["listing_links"] == [
-        {"name": "First \ufffd headline", "link": "https://news.test/a"},
+        {"name": "First \U0001f996 headline", "link": "https://news.test/a"},
         {"name": "Second headline", "link": "https://news.test/b"},
     ]
     assert "listing_links: 2" in _text_of(result)

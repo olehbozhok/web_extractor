@@ -40,8 +40,6 @@ from web_extractor.mcp_api.formatting import (
     error_text,
     fenced_body,
     retry_render,
-    sanitize_json_value,
-    sanitize_non_bmp,
 )
 from web_extractor.service.cursor_service import (
     CursorService,
@@ -270,13 +268,13 @@ class ErrorMeta(BaseModel):
 def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> CallToolResult:
     """A successful response: text block plus metadata-only structured part.
 
-    Every string leaving the tool is sanitized here: astral code points
-    (emoji and the like in anchor texts and page bodies) crash client agents
-    and become U+FFFD (docs/03).
+    Strings are passed through as they are: page text and anchor texts reach
+    the response unchanged, so a quote shown by fetch_page is exactly what
+    find_in_page searches (docs/03, the no-sanitization decision).
     """
     return CallToolResult(
-        content=[TextContent(type="text", text=sanitize_non_bmp(body))],
-        structured_content=sanitize_json_value(meta.model_dump(mode="json")),
+        content=[TextContent(type="text", text=body)],
+        structured_content=meta.model_dump(mode="json"),
         is_error=False,
     )
 
@@ -297,10 +295,8 @@ def _error_response(
         retry_render=retry_render(kind, fetcher),
     )
     return CallToolResult(
-        content=[
-            TextContent(type="text", text=sanitize_non_bmp(error_text(kind, message, fetcher)))
-        ],
-        structured_content=sanitize_json_value(meta.model_dump(mode="json")),
+        content=[TextContent(type="text", text=error_text(kind, message, fetcher))],
+        structured_content=meta.model_dump(mode="json"),
         is_error=True,
     )
 
