@@ -3,7 +3,10 @@
 import pytest
 
 from web_extractor.domain.extract import Extracted, ExtractionFailure
-from web_extractor.extractors.trafilatura_extractor import TrafilaturaExtractor
+from web_extractor.extractors.trafilatura_extractor import (
+    TrafilaturaExtractor,
+    _is_raw_html_dump,
+)
 
 _ARTICLE = """
 <html>
@@ -139,3 +142,91 @@ async def test_extracted_text_that_demands_javascript_is_needs_js() -> None:
 
     assert isinstance(result, ExtractionFailure)
     assert result.kind == "needs_js"
+
+
+_ESCAPED_DUMP_PAGE = (
+    b"<html><body><pre>&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;"
+    b"challenge&lt;/body&gt;&lt;/html&gt;</pre></body></html>"
+)
+
+_DOUBLE_ESCAPED_DUMP_PAGE = (
+    b"<html><head><title>ch</title></head><body><pre>"
+    b"&amp;lt;html&amp;gt;&amp;lt;body&amp;gt;challenge"
+    b"&amp;lt;/body&amp;gt;&amp;lt;/html&amp;gt;</pre></body></html>"
+)
+
+
+@pytest.mark.asyncio
+async def test_escaped_source_markup_is_a_failed_extraction() -> None:
+    """Regression: a challenge page's escaped HTML came through as ok text.
+
+    trafilatura unescapes the visible text of the <pre> and hands back the
+    page markup as the extracted "text"; that dump is a failed extraction,
+    never content. The extractor is run three times because the case came
+    from a nondeterministic production observation; the pinned trafilatura
+    version returns the dump on every run.
+    """
+    for _ in range(3):
+        result = await TrafilaturaExtractor().extract(
+            _ESCAPED_DUMP_PAGE, "https://challenge.test/x", "text"
+        )
+        assert isinstance(result, ExtractionFailure)
+        assert result.kind == "empty"
+        assert "raw HTML markup" in result.message
+
+
+@pytest.mark.asyncio
+async def test_escaped_source_markup_in_markdown_is_a_failed_extraction() -> None:
+    """The same dump through markdown output arrives backslash-escaped.
+
+    trafilatura's markdown writer escapes the markup it hands through with
+    backslashes ("\\<!DOCTYPE html>\\<html>..."), a third dump form that
+    needs its own prefixes.
+    """
+    for _ in range(3):
+        result = await TrafilaturaExtractor().extract(
+            _ESCAPED_DUMP_PAGE, "https://challenge.test/x", "markdown"
+        )
+        assert isinstance(result, ExtractionFailure)
+        assert result.kind == "empty"
+
+
+@pytest.mark.asyncio
+async def test_double_escaped_source_markup_is_a_failed_extraction() -> None:
+    """A dump may also arrive from double-escaped markup (prefix ``<html``)."""
+    for _ in range(3):
+        result = await TrafilaturaExtractor().extract(
+            _DOUBLE_ESCAPED_DUMP_PAGE, "https://challenge.test/x", "text"
+        )
+        assert isinstance(result, ExtractionFailure)
+        assert result.kind == "empty"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("<!DOCTYPE html><html><body>challenge</body></html>", True),
+        ("<!doctype html><head><title>ch</title></head>", True),
+        ('<html lang="en"><body>challenge</body></html>', True),
+        ("&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;&lt;/body&gt;&lt;/html&gt;", True),
+        ("&lt;html lang=&quot;en&quot;&gt;", True),
+        ("\\<!DOCTYPE html>\\<html>\\<body>challenge\\</body>\\</html>", True),
+        ('\\<html lang="en">', True),
+        ("  \n\t<!DOCTYPE html><html><body>challenge</body></html>", True),
+        ("  &lt;html&gt;&lt;body&gt;", True),
+        # Only contains "<html", not at the start: real content.
+        ('The article quotes a snippet: <html lang="en"> inside a code block.', False),
+        ("# Report\n\nRead the [full source](https://example.test/one) for details.", False),
+        # Only contains "\\<", not at the start: real markdown content.
+        ("Prose with an escaped \\<angle\\> bracket in the middle of a sentence.", False),
+        ("A plain article that starts with prose about everyday things.", False),
+    ],
+)
+def test_is_raw_html_dump(*, text: str, expected: bool) -> None:
+    """Table of dump prefixes: all three forms, case, whitespace, negatives.
+
+    The entity-escaped prefixes cannot be produced through trafilatura (it
+    unescapes before handing text over), so the escaped form is pinned here;
+    the backslash-escaped form is what markdown output emits.
+    """
+    assert _is_raw_html_dump(text) is expected
