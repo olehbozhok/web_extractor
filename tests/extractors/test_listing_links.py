@@ -1,6 +1,7 @@
 """Listing link extraction: document order, filters, same-site rule, cap."""
 
-from web_extractor.domain.listing_links import LISTING_LINKS_MAX, LinkItem, extract_listing_links
+from web_extractor.domain.listing_links import LinkItem
+from web_extractor.extractors.listing_links import LISTING_LINKS_MAX, extract_listing_links
 
 _PAGE = "https://news.test/index"
 
@@ -119,10 +120,9 @@ def test_navigation_menu_does_not_displace_headlines() -> None:
     fill the whole result: menu anchors are navigation, not content."""
     menu = "".join(_anchor(f"/category/{number}", f"Category {number}") for number in range(55))
     headlines = "".join(_anchor(f"/news/{number}", f"Headline {number}") for number in range(30))
-    html = f"<html><body><header><nav>{menu}</nav></header><main>{headlines}</main></body></html>"
-    html = html.encode()
+    page = f"<html><body><header><nav>{menu}</nav></header><main>{headlines}</main></body></html>"
 
-    links = extract_listing_links(html, _PAGE)
+    links = extract_listing_links(page.encode(), _PAGE)
 
     assert [item.name for item in links] == [f"Headline {number}" for number in range(30)]
 

@@ -32,7 +32,6 @@ from web_extractor.domain.fetch import (
     FetchRequest,
     FetchResult,
 )
-from web_extractor.domain.listing_links import extract_listing_links
 from web_extractor.domain.records import Event, PageRecord
 from web_extractor.domain.ttl import compute_expires_at, is_expired, parse_iso_utc, to_iso_utc
 from web_extractor.domain.types import (
@@ -45,6 +44,7 @@ from web_extractor.domain.types import (
 )
 from web_extractor.domain.urls import NormalizedUrl, UrlParseError, parse_normalized_url
 from web_extractor.extractors.base import Extractor
+from web_extractor.extractors.listing_links import extract_listing_links
 from web_extractor.fetchers.base import Fetcher
 from web_extractor.service.config import ServiceConfig
 from web_extractor.service.domain_limits import DomainLimiter
