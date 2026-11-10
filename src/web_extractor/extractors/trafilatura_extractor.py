@@ -6,6 +6,7 @@ nothing about which fetcher produced the HTML.
 """
 
 import asyncio
+from typing import Final
 
 import trafilatura
 
@@ -39,6 +40,25 @@ a comments widget), and a real short article must not become ``needs_js``."""
 _JS_TEXT_MARKER_LIMIT = 1000
 """Extractions up to this length whose *extracted text itself* says JavaScript is
 required are JS-only shells (e.g. "JavaScript is not available" pages)."""
+
+_RAW_DUMP_PREFIXES: Final = (
+    "<!doctype html",
+    "<html",
+    "&lt;!doctype html",
+    "&lt;html",
+    "\\<!doctype html",
+    "\\<html",
+)
+"""Prefixes of a raw HTML source dump returned as extracted "text".
+
+Three forms are listed, one per way the markup can reach the extracted text:
+the literal form ("<html ..."), when trafilatura hands the page markup
+through as-is; the entity-escaped form ("&lt;html ..."), when the page
+carries its markup once escaped and trafilatura unescapes the visible text
+it found — challenge pages arrive precisely as such escaped dumps; and the
+backslash-escaped form ("\\<html ..."), which markdown output produces when
+it escapes the markup it passes through. Real main text never starts with
+the document markup in any of these forms."""
 
 _OUTPUT_FORMATS: dict[PageFormat, str] = {
     "markdown": "markdown",
@@ -77,6 +97,13 @@ class TrafilaturaExtractor:
                 return ExtractionFailure("needs_js", msg)
             msg = f"no main text found on page {final_url}"
             return ExtractionFailure("empty", msg)
+        # Checked before the JS markers below: a dump can embed JS-required
+        # markers copied from the source page, and the JS checks are
+        # length-limited, so a dump must be ruled out first — a dump of any
+        # shape is a failed extraction, never content.
+        if _is_raw_html_dump(text):
+            msg = f"page {final_url} extraction returned raw HTML markup instead of main text"
+            return ExtractionFailure("empty", msg)
         if (len(text) <= _JS_STUB_TEXT_LIMIT and _looks_like_js_page(html)) or (
             len(text) <= _JS_TEXT_MARKER_LIMIT and _has_js_marker(text)
         ):
@@ -101,6 +128,17 @@ class TrafilaturaExtractor:
             language=document.language,
             publisher=document.sitename,
         )
+
+
+def _is_raw_html_dump(text: str) -> bool:
+    """True when ``text`` is the page's source markup, not main content.
+
+    Prefix check only, in every form listed in :data:`_RAW_DUMP_PREFIXES`:
+    whatever follows the document tag may be anything, and main text never
+    starts with the document markup.
+    """
+    lowered = text.lstrip().lower()
+    return lowered.startswith(_RAW_DUMP_PREFIXES)
 
 
 def _looks_like_js_page(html: bytes) -> bool:
