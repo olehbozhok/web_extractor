@@ -26,6 +26,7 @@ from web_extractor.domain.types import (
     Clock,
     DetailLevel,
     ErrorKind,
+    FetcherName,
     PageFormat,
     RenderMode,
     TaskId,
@@ -37,6 +38,7 @@ from web_extractor.mcp_api.formatting import (
     cursor_line,
     error_text,
     fenced_body,
+    retry_render,
 )
 from web_extractor.service.cursor_service import (
     CursorService,
@@ -174,6 +176,8 @@ class UrlRow(BaseModel):
     published_source: str | None = None
     source: str
     error_kind: str | None = None
+    retry_render: RenderMode | None = None
+    """For a failed row: the render mode worth one retry, if switching may help."""
 
 
 class PageMeta(BaseModel):
@@ -244,6 +248,10 @@ class ErrorMeta(BaseModel):
     url: str | None = None
     error_kind: str
     error_message: str
+    fetcher: FetcherName | None = None
+    """The fetcher whose attempt failed; ``None`` when nothing was fetched."""
+    retry_render: RenderMode | None = None
+    """The render mode worth one retry, if switching fetchers may help."""
 
 
 def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> CallToolResult:
@@ -255,11 +263,23 @@ def _text_response(meta: PageMeta | FindMeta | CheckUrlsMeta, body: str) -> Call
     )
 
 
-def _error_response(url: str | None, kind: ErrorKind, message: str) -> CallToolResult:
-    """An error response: ``ERROR kind: ...`` text with structured kind."""
-    meta = ErrorMeta(url=url, error_kind=kind, error_message=message)
+def _error_response(
+    url: str | None, kind: ErrorKind, message: str, fetcher: FetcherName | None = None
+) -> CallToolResult:
+    """An error response: ``ERROR kind: ...`` text with structured kind.
+
+    ``fetcher`` is the fetcher that failed (``None`` for argument and cursor
+    errors); it selects the render mode advised for a retry.
+    """
+    meta = ErrorMeta(
+        url=url,
+        error_kind=kind,
+        error_message=message,
+        fetcher=fetcher,
+        retry_render=retry_render(kind, fetcher),
+    )
     return CallToolResult(
-        content=[TextContent(type="text", text=error_text(kind, message))],
+        content=[TextContent(type="text", text=error_text(kind, message, fetcher))],
         structured_content=meta.model_dump(mode="json"),
         is_error=True,
     )
@@ -563,9 +583,7 @@ async def _fetch_page(deps: McpToolDeps, args: _FetchPageArgs) -> CallToolResult
 
     outcome = await deps.service.fetch(request)
     if outcome.status != "ok":
-        return _error_response(
-            outcome.url, _kind_of(outcome), outcome.error_message or outcome.status
-        )
+        return _outcome_error(outcome)
 
     text = outcome.text or ""
     shown_format = outcome.text_format or args.page_format
@@ -715,9 +733,7 @@ async def _find_in_page(deps: McpToolDeps, args: _FindInPageArgs) -> CallToolRes
     )
     outcome = await deps.service.fetch(request)
     if outcome.status != "ok":
-        return _error_response(
-            outcome.url, _kind_of(outcome), outcome.error_message or outcome.status
-        )
+        return _outcome_error(outcome)
 
     text = outcome.text or ""
     matches = find_matches(
@@ -883,8 +899,12 @@ def _check_row(number: int, raw_url: str, outcome: FetchOutcome) -> str:
         if published is not None:
             row += f" | published={published}"
         row += f" | {source}"
-    elif outcome.error_message:
-        row += f" - {outcome.error_message}"
+    else:
+        if outcome.error_message:
+            row += f" - {outcome.error_message}"
+        mode = retry_render(_kind_of(outcome), outcome.fetcher)
+        if mode is not None:
+            row += f" | retry: render={mode}"
     return row
 
 
@@ -905,6 +925,9 @@ def _check_row_meta(outcome: FetchOutcome) -> UrlRow:
         published_source=outcome.metadata.published_source,
         source="cache" if outcome.from_cache else "network",
         error_kind=outcome.error_kind,
+        retry_render=(
+            retry_render(_kind_of(outcome), outcome.fetcher) if outcome.status != "ok" else None
+        ),
     )
 
 
@@ -922,6 +945,16 @@ async def _rejected(
     """Journal an argument-level rejection and format its error response."""
     outcome = await deps.service.record_rejection(request, kind, message)
     return _error_response(outcome.url, kind, message)
+
+
+def _outcome_error(outcome: FetchOutcome) -> CallToolResult:
+    """The error response for a non-ok page outcome, with retry advice."""
+    return _error_response(
+        outcome.url,
+        _kind_of(outcome),
+        outcome.error_message or outcome.status,
+        outcome.fetcher,
+    )
 
 
 def _kind_of(outcome: FetchOutcome) -> ErrorKind:

@@ -8,9 +8,10 @@ from mcp.types import CallToolResult, TextContent
 
 from mcp import ClientSession
 from tests.mcp.conftest import McpHarness
-from tests.service.service_helpers import extracted, fetched_ok, normalized
+from tests.service.service_helpers import extracted, fetched_blocked, fetched_ok, normalized
 from web_extractor.domain.extract import Extracted, PageMetadata
 from web_extractor.domain.fetch import FetchFailure
+from web_extractor.domain.types import HttpStatus
 
 _URL = "https://site.test/article"
 _LONG = "A sentence of the real article body. " * 40
@@ -303,5 +304,49 @@ async def test_error_root_carries_only_error_fields(mcp: McpHarness) -> None:
     result = await _call(mcp, "fetch_page", {"url": _URL})
 
     assert result.structured_content is not None
-    assert set(result.structured_content) == {"status", "url", "error_kind", "error_message"}
+    assert set(result.structured_content) == {
+        "status",
+        "url",
+        "error_kind",
+        "error_message",
+        "fetcher",
+        "retry_render",
+    }
     assert result.structured_content["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_static_block_error_advises_browser_retry(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_blocked(normalized(_URL)))
+
+    result = await _call(mcp, "fetch_page", {"url": _URL, "render": "static"})
+
+    assert result.is_error is True
+    assert "render=browser" in _text_of(result)
+    assert result.structured_content is not None
+    assert result.structured_content["fetcher"] == "http"
+    assert result.structured_content["retry_render"] == "browser"
+
+
+@pytest.mark.asyncio
+async def test_check_urls_row_carries_retry_advice(mcp: McpHarness) -> None:
+    mcp.fetcher.script(fetched_blocked(normalized(_URL)))
+
+    result = await _call(mcp, "check_urls", {"urls": [_URL], "render": "static"})
+
+    assert "| retry: render=browser" in _text_of(result)
+    assert result.structured_content is not None
+    assert result.structured_content["url_rows"][0]["retry_render"] == "browser"
+
+
+@pytest.mark.asyncio
+async def test_not_found_gives_no_render_advice(mcp: McpHarness) -> None:
+    mcp.fetcher.script(
+        FetchFailure("not_found", "404", http_status=HttpStatus(404), final_url=normalized(_URL))
+    )
+
+    result = await _call(mcp, "fetch_page", {"url": _URL, "render": "static"})
+
+    assert "render=" not in _text_of(result)
+    assert result.structured_content is not None
+    assert result.structured_content["retry_render"] is None
