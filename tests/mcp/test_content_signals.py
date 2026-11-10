@@ -212,7 +212,7 @@ async def test_document_kind_is_sniffed_and_declared_type_shown_when_detailed(
     assert "document: pdf" in _text_of(concise)
     assert concise.structured_content is not None
     assert concise.structured_content["document"] == "pdf"
-    assert concise.structured_content["content_type"] is None  # only when detailed
+    assert "content_type" not in concise.structured_content  # only when detailed
     assert "content_type: text/html" in _text_of(detailed)
     assert detailed.structured_content is not None
     assert detailed.structured_content["content_type"] == "text/html"
@@ -255,7 +255,7 @@ async def test_no_date_line_without_a_structured_date(mcp: McpHarness) -> None:
 
     assert "published:" not in _text_of(page)
     assert page.structured_content is not None
-    assert page.structured_content["published_at"] is None
+    assert "published_at" not in page.structured_content
 
 
 @pytest.mark.asyncio
@@ -304,13 +304,13 @@ async def test_error_root_carries_only_error_fields(mcp: McpHarness) -> None:
     result = await _call(mcp, "fetch_page", {"url": _URL})
 
     assert result.structured_content is not None
+    # None fields (retry_render: DNS gets no retry advice) are omitted, not null.
     assert set(result.structured_content) == {
         "status",
         "url",
         "error_kind",
         "error_message",
         "fetcher",
-        "retry_render",
     }
     assert result.structured_content["status"] == "error"
 
@@ -349,4 +349,4 @@ async def test_not_found_gives_no_render_advice(mcp: McpHarness) -> None:
 
     assert "render=" not in _text_of(result)
     assert result.structured_content is not None
-    assert result.structured_content["retry_render"] is None
+    assert "retry_render" not in result.structured_content

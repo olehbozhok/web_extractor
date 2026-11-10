@@ -108,7 +108,7 @@ async def test_continuation_chunk_carries_no_listing_links(mcp: McpHarness) -> N
     more = await _call(mcp, "read_more", {"cursor": cursor})
 
     assert more.structured_content is not None
-    assert more.structured_content["listing_links"] is None
+    assert "listing_links" not in more.structured_content
     assert "listing_links" not in _text_of(more)
     assert "UNTRUSTED LISTING LINKS" not in _text_of(more)
 
@@ -132,7 +132,7 @@ async def test_pdf_answer_has_no_listing_links(mcp: McpHarness) -> None:
 
     assert result.structured_content is not None
     assert result.structured_content["document"] == "pdf"
-    assert result.structured_content["listing_links"] is None
+    assert "listing_links" not in result.structured_content
     assert "listing_links" not in _text_of(result)
 
 
