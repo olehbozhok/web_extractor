@@ -71,6 +71,10 @@ class BrowserFetcherConfig:
     """Must be lower than Crawl4AI's pool.max_pages (docs/spikes/02)."""
     allowed_ports: tuple[int, ...]
     """The same port allow-list as the static fetcher (SSRF, section 7)."""
+    max_response_bytes: int
+    """Bodies above this many UTF-8 bytes come back ``too_large`` like the
+    static fetcher's (docs/01, 4.5), instead of flowing into the cache and
+    extraction."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,11 +208,18 @@ class BrowserFetcher:
         if kind is not None:
             msg = f"{request.url} returned {code} through the browser ({kind})"
             return FetchFailure(kind, msg, http_status=status, final_url=parsed)
+        body = answer.html.encode("utf-8")
+        if len(body) > self._config.max_response_bytes:
+            msg = (
+                f"body of {request.url} through the browser is {len(body)} bytes, "
+                f"limit is {self._config.max_response_bytes}"
+            )
+            return FetchFailure("too_large", msg, http_status=status, final_url=parsed)
         return Fetched(
             final_url=parsed,
             http_status=status,
             headers=answer.response_headers,
-            body=answer.html.encode("utf-8"),
+            body=body,
             fetched_at=self._clock.now(),
             fetcher="browser",
         )

@@ -1,6 +1,7 @@
 """BrowserFetcher tests: mapping /crawl answers per the verified contract."""
 
 import json
+from dataclasses import replace
 from ipaddress import IPv4Address
 
 import httpx
@@ -29,6 +30,7 @@ def _config() -> BrowserFetcherConfig:
         page_timeout_ms=15000,
         max_concurrent=2,
         allowed_ports=(80, 443, 8080, 8443),
+        max_response_bytes=10_000_000,
     )
 
 
@@ -92,6 +94,27 @@ async def test_404_maps_to_not_found() -> None:
     result = await _fetcher().fetch(_request())
     assert isinstance(result, FetchFailure)
     assert result.kind == "not_found"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_oversized_response_is_too_large() -> None:
+    """The size limit applies to the browser like to the static fetcher
+    (docs/01, 4.5): an arbitrary body must not reach cache and extraction."""
+    fetcher = BrowserFetcher(
+        replace(_config(), max_response_bytes=100),
+        FakeClock(),
+        StaticResolver({"site.test": [IPv4Address("8.8.8.8")]}),
+    )
+    respx.post("http://crawl4ai.test:11235/crawl").mock(
+        return_value=_answer_for(_crawl_payload(html="x" * 101))
+    )
+
+    result = await fetcher.fetch(_request())
+
+    assert isinstance(result, FetchFailure)
+    assert result.kind == "too_large"
+    assert "limit is 100" in result.message
 
 
 @respx.mock

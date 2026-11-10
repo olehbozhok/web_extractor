@@ -111,6 +111,7 @@ def create_app(
             page_timeout_ms=settings.browser_page_timeout_ms,
             max_concurrent=settings.browser_max_concurrent,
             allowed_ports=tuple(settings.allowed_ports),
+            max_response_bytes=settings.max_response_bytes,
         )
         if settings.browser_base_url and settings.browser_token
         else None
