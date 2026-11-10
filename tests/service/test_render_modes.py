@@ -187,6 +187,35 @@ async def test_an_empty_render_from_the_browser_is_not_needs_browser(
 
 
 @pytest.mark.asyncio
+async def test_an_empty_render_error_is_cached_and_readable(
+    browser_harness: ServiceHarness,
+) -> None:
+    """The cached empty_render record and its journal event must read back:
+    the storage boundary knows every kind the pipeline can write. The cache
+    is consulted before the TTL check and even on fresh re-fetches, so an
+    unreadable record would make the URL permanently broken."""
+    empty = b"<html><body><canvas></canvas></body></html>"
+    browser_harness.browser_fetcher.script(
+        fetched_ok(normalized(_URL), empty),
+        fetched_ok(normalized(_URL), empty),
+    )
+    browser_harness.extractor.script(
+        ExtractionFailure("empty", "no text after rendering"),
+        ExtractionFailure("empty", "no text after rendering"),
+    )
+
+    first = await browser_harness.service.fetch(service_request(_URL, render="browser"))
+    second = await browser_harness.service.fetch(service_request(_URL, render="browser"))
+
+    assert first.error_kind == "empty_render"
+    assert second.status == "error"
+    assert second.from_cache is True
+    assert second.error_kind == "empty_render"
+    rows = await browser_harness.event_rows()
+    assert rows[-1]["error_kind"] == "empty_render"
+
+
+@pytest.mark.asyncio
 async def test_a_browser_failure_is_cached_for_browser_requests(
     browser_harness: ServiceHarness,
 ) -> None:
